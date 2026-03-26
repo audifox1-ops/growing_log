@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Baby, Plus, Trash2, Users, ChevronRight, X, Camera, Loader2, AlertCircle, Check, Video, Upload, Calendar, Clock, Image as ImageIcon, ChevronUp, ChevronDown, Save, Play, Music, Edit3, List, ArrowLeft, Sparkles, Layout
+  Baby, Plus, Trash2, Users, ChevronRight, X, Camera, Loader2, AlertCircle, Check, Video, Upload, Calendar, Clock, Image as ImageIcon, ChevronUp, ChevronDown, Save, Play, Music, Edit3, List, ArrowLeft, Sparkles, Layout, RefreshCw
 } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import exifr from 'exifr';
@@ -73,7 +73,10 @@ export default function App() {
   );
 
   // --- UI State ---
-  const [view, setView] = useState<'loading' | 'onboarding' | 'dashboard' | 'profiles' | 'video-editor' | 'video-list'>('loading');
+  const [mounted, setMounted] = useState(false);
+  const [initError, setInitError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [view, setView] = useState<'onboarding' | 'dashboard' | 'profiles' | 'video-editor' | 'video-list'>('dashboard');
   const [showAddProfileModal, setShowAddProfileModal] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
@@ -105,19 +108,70 @@ export default function App() {
   const [newBirthDate, setNewBirthDate] = useState('');
   const [newProfileImage, setNewProfileImage] = useState<Blob | null>(null);
 
-  // --- Initialization ---
+  // --- Initialization Logic ---
   useEffect(() => {
+    setMounted(true);
+    
+    const initialize = async () => {
+      try {
+        if (typeof window === 'undefined') return;
+        
+        // Check IndexedDB support (Crucial for mobile private modes)
+        if (!window.indexedDB) {
+          throw new Error('이 브라우저는 로컬 데이터베이스(IndexedDB)를 지원하지 않습니다. 최신 브라우저를 사용해 주세요.');
+        }
+
+        // Try to open Dexie DB
+        if (!db.isOpen()) {
+          await db.open();
+        }
+        console.log("Database initialized successfully");
+      } catch (err: any) {
+        console.error("Critical Initialization Error:", err);
+        setInitError("데이터베이스 초기화에 실패했습니다. 모바일 브라우저의 시크릿 모드를 해제하거나 캐시를 비우고 다시 시도해 주세요.");
+      } finally {
+        // Ensure loading state is cleared even on error
+        // We wait a bit for useLiveQuery to potentially populate children
+        setTimeout(() => {
+          setIsLoading(false);
+        }, 500);
+      }
+    };
+    
+    initialize();
+  }, []);
+
+  // Handle View Transitions based on DB data
+  useEffect(() => {
+    if (!mounted || initError) return;
+
     if (children !== undefined) {
       if (children.length === 0) {
         setView('onboarding');
       } else {
+        // Only set active child if not already set or invalid
         if (!activeChildId || !children.some(c => c.id === activeChildId)) {
           setActiveChildId(children[0].id!);
         }
-        if (view === 'loading') setView('dashboard');
       }
+      // If data is loaded, we can stop loading
+      setIsLoading(false);
     }
-  }, [children, activeChildId, setActiveChildId, view]);
+  }, [mounted, children, activeChildId, setActiveChildId, initError]);
+
+  // Timeout for infinite loading (Safety net)
+  useEffect(() => {
+    if (!mounted || !isLoading || initError) return;
+    
+    const timer = setTimeout(() => {
+      if (isLoading) {
+        setInitError("초기화 시간이 너무 오래 걸립니다. 네트워크 상태를 확인하거나 브라우저를 새로고침해 주세요.");
+        setIsLoading(false);
+      }
+    }, 6000); // Shorter timeout for better UX
+    
+    return () => clearTimeout(timer);
+  }, [mounted, isLoading, initError]);
 
   // --- Handlers ---
 
@@ -571,12 +625,45 @@ export default function App() {
     }
   };
 
-  // --- Render Helpers ---
+  // --- Render Logic ---
 
-  if (view === 'loading') {
+  if (!mounted) return null;
+
+  if (initError) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#FDF8F5]">
-        <Loader2 className="animate-spin text-[#A7C080]" size={48} />
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#FDF8F5] p-6 text-center">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="max-w-sm w-full bg-white p-10 rounded-[40px] shadow-xl border border-red-50"
+        >
+          <div className="w-20 h-20 bg-red-50 rounded-3xl flex items-center justify-center text-red-400 mx-auto mb-6">
+            <AlertCircle size={40} />
+          </div>
+          <h1 className="text-xl font-bold text-[#4B4453] mb-4">접속 오류가 발생했습니다</h1>
+          <p className="text-[#8E8E8E] mb-8 text-sm leading-relaxed">
+            {initError}
+          </p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="w-full bg-[#A7C080] text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-[#8FA86A] transition-all shadow-lg shadow-[#A7C080]/20"
+          >
+            <RefreshCw size={18} />
+            <span>새로고침</span>
+          </button>
+          <p className="mt-6 text-[11px] text-[#BDBDBD]">
+            지속적으로 문제가 발생하면 브라우저의 시크릿 모드를 해제하거나 쿠키 설정을 확인해 주세요.
+          </p>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#FDF8F5]">
+        <Loader2 className="animate-spin text-[#A7C080] mb-4" size={48} />
+        <p className="text-[#8E8E8E] font-bold animate-pulse">데이터를 불러오는 중...</p>
       </div>
     );
   }
