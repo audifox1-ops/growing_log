@@ -25,10 +25,11 @@ export default function App() {
   const children = useLiveQuery(() => db.children.toArray());
   
   // Fetch photos for the active child, sorted by takenAt (newest first)
+  // Updated to use MultiEntry index 'childIds'
   const photos = useLiveQuery(
     async () => {
       if (!activeChildId) return [];
-      const data = await db.photos.where('childId').equals(activeChildId).toArray();
+      const data = await db.photos.where('childIds').equals(activeChildId).toArray();
       return data.sort((a, b) => b.takenAt - a.takenAt);
     },
     [activeChildId]
@@ -71,6 +72,11 @@ export default function App() {
   const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
   const [isGeneratingCaptions, setIsGeneratingCaptions] = useState(false);
+
+  // --- Multi-Child Upload State ---
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<FileList | null>(null);
+  const [uploadChildIds, setUploadChildIds] = useState<number[]>([]);
 
   // --- Video Editor State ---
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<number[]>([]);
@@ -129,15 +135,29 @@ export default function App() {
 
   /**
    * Deletes a child profile.
+   * Updated to handle multi-child photo references.
    */
   const handleDeleteChild = async (id: number) => {
     if (!confirm('이 자녀의 모든 데이터가 삭제됩니다. 계속하시겠습니까?')) return;
     try {
       await db.transaction('rw', [db.children, db.photos, db.videoProjects], async () => {
-        await db.photos.where('childId').equals(id).delete();
+        // Find photos that contain this child ID in their childIds array
+        const photosToUpdate = await db.photos.where('childIds').equals(id).toArray();
+        for (const photo of photosToUpdate) {
+          const newChildIds = photo.childIds.filter(cid => cid !== id);
+          if (newChildIds.length === 0) {
+            // No more children associated with this photo, delete it
+            await db.photos.delete(photo.id!);
+          } else {
+            // Other children still associated, just update the array
+            await db.photos.update(photo.id!, { childIds: newChildIds });
+          }
+        }
+        
         await db.videoProjects.where('childId').equals(id).delete();
         await db.children.delete(id);
       });
+      
       if (activeChildId === id) {
         const remaining = children?.filter(c => c.id !== id);
         if (remaining && remaining.length > 0) {
@@ -148,22 +168,41 @@ export default function App() {
         }
       }
     } catch (err) {
+      console.error('Delete Error:', err);
       setError('자녀 프로필 삭제 실패');
     }
   };
 
   /**
-   * Handles multiple photo uploads with EXIF extraction and age calculation.
+   * Handles file selection and opens the multi-child selection modal.
    */
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     
-    if (!activeChildId || !activeChild) {
+    if (!activeChildId) {
       setError('자녀를 먼저 선택해 주세요.');
       return;
     }
 
+    setPendingFiles(files);
+    setUploadChildIds([activeChildId]); // Default to currently active child
+    setIsUploadModalOpen(true);
+    e.target.value = ''; // Reset input
+  };
+
+  /**
+   * Processes the actual upload after children are selected.
+   */
+  const startUpload = async () => {
+    if (!pendingFiles || uploadChildIds.length === 0) {
+      setError('최소 한 명의 자녀를 선택해 주세요.');
+      return;
+    }
+
+    const files = pendingFiles;
+    setPendingFiles(null);
+    setIsUploadModalOpen(false);
     setIsUploading(true);
     setUploadProgress({ current: 0, total: files.length });
     setError(null);
@@ -186,7 +225,10 @@ export default function App() {
           takenAt = file.lastModified;
         }
 
-        const ageInMonths = calculateAgeInMonths(activeChild.birthDate, takenAt);
+        // Calculate age based on the first selected child for categorization
+        // (In a more complex app, we might store age per child, but for now we use the primary context)
+        const primaryChild = children?.find(c => c.id === uploadChildIds[0]);
+        const ageInMonths = primaryChild ? calculateAgeInMonths(primaryChild.birthDate, takenAt) : 0;
 
         let category = '기타';
         if (ageInMonths < 12) category = '영아기';
@@ -194,7 +236,7 @@ export default function App() {
         else category = '아동기';
 
         photoEntries.push({
-          childId: activeChildId,
+          childIds: uploadChildIds, // Save as array
           blob: file,
           fileName: file.name,
           fileSize: file.size,
@@ -215,7 +257,6 @@ export default function App() {
       setError('사진 업로드 중 오류가 발생했습니다.');
     } finally {
       setIsUploading(false);
-      e.target.value = '';
     }
   };
 
@@ -294,7 +335,6 @@ export default function App() {
       };
 
       if (editingProjectId) {
-        // Fix for TypeScript error: use put with ID for updates to avoid UpdateSpec issues
         await db.videoProjects.put({ ...projectData, id: editingProjectId });
       } else {
         await db.videoProjects.add(projectData);
@@ -479,6 +519,74 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Multi-Child Upload Selection Modal */}
+      <AnimatePresence>
+        {isUploadModalOpen && (
+          <div className="fixed inset-0 bg-[#4B4453]/40 backdrop-blur-sm z-[110] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white w-full max-w-md p-8 rounded-[40px] shadow-2xl border border-[#A7C080]/10"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-[#4B4453]">이 사진에 누가 있나요?</h2>
+                <button onClick={() => setIsUploadModalOpen(false)} className="text-[#8E8E8E] hover:text-[#4B4453]">
+                  <X size={24} />
+                </button>
+              </div>
+
+              <p className="text-[#8E8E8E] mb-6 text-sm">선택한 자녀들의 앨범에 사진이 함께 저장됩니다.</p>
+
+              <div className="space-y-3 mb-8 max-h-60 overflow-y-auto pr-2">
+                {children?.map(child => (
+                  <label 
+                    key={child.id}
+                    className={`flex items-center gap-4 p-4 rounded-2xl border-2 transition-all cursor-pointer ${uploadChildIds.includes(child.id!) ? 'border-[#A7C080] bg-[#A7C080]/5' : 'border-[#FDF8F5] bg-[#FDF8F5]'}`}
+                  >
+                    <input 
+                      type="checkbox"
+                      className="hidden"
+                      checked={uploadChildIds.includes(child.id!)}
+                      onChange={() => {
+                        setUploadChildIds(prev => 
+                          prev.includes(child.id!) ? prev.filter(id => id !== child.id) : [...prev, child.id!]
+                        );
+                      }}
+                    />
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white overflow-hidden relative ${uploadChildIds.includes(child.id!) ? 'bg-[#A7C080]' : 'bg-[#E5E5E5]'}`}>
+                      {child.profileImage ? (
+                        <Image src={URL.createObjectURL(child.profileImage)} fill className="object-cover" alt="Profile" referrerPolicy="no-referrer" />
+                      ) : (
+                        <Baby size={20} fill="currentColor" />
+                      )}
+                    </div>
+                    <span className="font-bold flex-1">{child.name}</span>
+                    {uploadChildIds.includes(child.id!) && <Check size={20} className="text-[#A7C080]" />}
+                  </label>
+                ))}
+              </div>
+
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setIsUploadModalOpen(false)} 
+                  className="flex-1 py-4 bg-[#FDF8F5] text-[#8E8E8E] rounded-2xl font-bold hover:bg-[#F5F0E8] transition-colors"
+                >
+                  취소
+                </button>
+                <button 
+                  onClick={startUpload}
+                  disabled={uploadChildIds.length === 0}
+                  className="flex-1 py-4 bg-[#A7C080] text-white rounded-2xl font-bold hover:bg-[#8FA86A] transition-colors shadow-lg shadow-[#A7C080]/20 disabled:opacity-50"
+                >
+                  업로드 시작
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence mode="wait">
         {/* Onboarding View */}
         {view === 'onboarding' && (
@@ -575,7 +683,7 @@ export default function App() {
                       accept="image/*" 
                       className="hidden" 
                       disabled={!activeChildId}
-                      onChange={handlePhotoUpload} 
+                      onChange={handleFileSelect} 
                     />
                   </label>
                 </div>
@@ -720,7 +828,7 @@ export default function App() {
           </motion.div>
         )}
 
-        {/* Video Editor View (Step 4: Storyboard & Metadata) */}
+        {/* Video Editor View */}
         {view === 'video-editor' && (
           <motion.div
             key="video-editor"

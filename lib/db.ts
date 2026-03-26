@@ -12,11 +12,11 @@ export interface Child {
 }
 
 /**
- * Photo Entity: Represents a photo belonging to a child.
+ * Photo Entity: Represents a photo belonging to one or more children.
  */
 export interface Photo {
   id?: number;
-  childId: number; // Foreign key to Child.id
+  childIds: number[]; // Array of Foreign keys to Child.id (MultiEntry)
   blob: Blob;
   fileName: string;
   fileSize: number;
@@ -59,10 +59,10 @@ export class AppDatabase extends Dexie {
     
     // Define tables and indexes
     // ++id: Auto-incrementing primary key
-    // childId: Indexed for fast filtering by child
-    this.version(1).stores({
+    // *childIds: MultiEntry index for fast filtering by any child in the array
+    this.version(2).stores({
       children: '++id, name, birthDate',
-      photos: '++id, childId, takenAt, category',
+      photos: '++id, *childIds, takenAt, category',
       videoProjects: '++id, childId, status'
     });
   }
