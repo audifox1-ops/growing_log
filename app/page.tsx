@@ -115,13 +115,13 @@ export default function App() {
     
     console.log("Starting database initialization...");
 
-    // 15-second timeout promise for mobile robustness
+    // 30-second timeout promise for mobile robustness
     const timeoutPromise = new Promise((_, reject) => 
       setTimeout(() => {
-        const error = new Error('초기화 시간이 너무 오래 걸립니다 (15초 초과). 모바일 환경이나 저장 공간 부족으로 인해 발생할 수 있습니다.');
+        const error = new Error('초기화 시간이 너무 오래 걸립니다 (30초 초과). 모바일 환경이나 저장 공간 부족으로 인해 발생할 수 있습니다.');
         error.name = 'TimeoutError';
         reject(error);
-      }, 15000)
+      }, 30000)
     );
 
     // Actual initialization promise
@@ -160,8 +160,23 @@ export default function App() {
       console.log("Database initialized successfully");
     } catch (err: any) {
       console.error("Critical Initialization Error:", err);
+      
+      let storageInfo = "";
+      try {
+        if (navigator.storage && navigator.storage.estimate) {
+          const estimate = await navigator.storage.estimate();
+          if (estimate.usage !== undefined && estimate.quota !== undefined) {
+            const usageMB = Math.round(estimate.usage / (1024 * 1024));
+            const quotaMB = Math.round(estimate.quota / (1024 * 1024));
+            storageInfo = ` (저장 공간 사용: ${usageMB}MB / ${quotaMB}MB)`;
+          }
+        }
+      } catch (e) {
+        console.error("Failed to estimate storage:", e);
+      }
+
       // Detailed error message for debugging
-      setInitError(`접속 오류가 발생했습니다. (원인: ${err.name || 'Error'} - ${err.message || '알 수 없는 오류'})`);
+      setInitError(`접속 오류가 발생했습니다. (원인: ${err.name || 'Error'} - ${err.message || '알 수 없는 오류'})${storageInfo}`);
     } finally {
       setIsLoading(false);
     }
@@ -179,10 +194,20 @@ export default function App() {
 
     db.on('blocked', handleBlocked);
     
+    // Handle versionchange (another tab is upgrading the database)
+    const handleVersionChange = () => {
+      console.log("Database version change detected. Closing database...");
+      db.close();
+      // Reloading might help the user get the new version
+      window.location.reload();
+    };
+    db.on('versionchange', handleVersionChange);
+    
     initialize();
 
     return () => {
       db.on('blocked').unsubscribe(handleBlocked);
+      db.on('versionchange').unsubscribe(handleVersionChange);
     };
   }, [initialize]);
 
