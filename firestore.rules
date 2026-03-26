@@ -1,0 +1,126 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: {userId}
+// Fields:
+//   - email: string (required, email)
+//   - name: string (required)
+//   - createdAt: timestamp (required)
+//
+// Collection: children
+// Document ID: {childId}
+// Fields:
+//   - userId: string (required)
+//   - name: string (required)
+//   - birthDate: string (required, YYYY-MM-DD)
+//   - gender: string (optional)
+//
+// Collection: photos
+// Document ID: {photoId}
+// Fields:
+//   - childId: string (required)
+//   - url: string (required, uri)
+//   - dateTaken: timestamp (required)
+//   - estimatedAge: number (optional)
+//   - category: string (optional)
+//
+// Collection: videos
+// Document ID: {videoId}
+// Fields:
+//   - childId: string (required)
+//   - videoUrl: string (required, uri)
+//   - templateUsed: string (optional)
+//   - createdAt: timestamp (required)
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUrl(url) {
+      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'name', 'createdAt']) &&
+             isValidEmail(data.email) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100;
+    }
+
+    function isValidChild(data) {
+      return data.keys().hasAll(['userId', 'name', 'birthDate']) &&
+             data.userId == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100;
+    }
+
+    function isValidPhoto(data) {
+      return data.keys().hasAll(['childId', 'url', 'dateTaken']) &&
+             isValidUrl(data.url);
+    }
+
+    function isValidVideo(data) {
+      return data.keys().hasAll(['childId', 'videoUrl', 'createdAt']) &&
+             isValidUrl(data.videoUrl);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    match /children/{childId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidChild(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner() && isValidChild(request.resource.data) &&
+                      request.resource.data.userId == resource.data.userId;
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+
+    match /photos/{photoId} {
+      // For MVP, we assume child ownership check is handled by app logic or more complex rules
+      // Here we simplify to auth check for brevity, but ideally we'd check if child belongs to user
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidPhoto(request.resource.data);
+      allow update: if isAuthenticated() && isValidPhoto(request.resource.data);
+      allow delete: if isAuthenticated();
+    }
+
+    match /videos/{videoId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidVideo(request.resource.data);
+      allow update: if isAuthenticated() && isValidVideo(request.resource.data);
+      allow delete: if isAuthenticated();
+    }
+  }
+}

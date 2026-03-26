@@ -1,0 +1,70 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Application user profile",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "name": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "name", "createdAt"]
+    },
+    "Child": {
+      "title": "Child",
+      "description": "Child profile linked to a user",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "birthDate": { "type": "string", "format": "date" },
+        "gender": { "type": "string", "enum": ["male", "female", "other"] }
+      },
+      "required": ["userId", "name", "birthDate"]
+    },
+    "Photo": {
+      "title": "Photo",
+      "description": "Uploaded photo of a child",
+      "type": "object",
+      "properties": {
+        "childId": { "type": "string" },
+        "url": { "type": "string", "format": "uri" },
+        "dateTaken": { "type": "string", "format": "date-time" },
+        "estimatedAge": { "type": "number" },
+        "category": { "type": "string", "description": "Growth stage (e.g., Infancy, Childhood)" }
+      },
+      "required": ["childId", "url", "dateTaken"]
+    },
+    "Video": {
+      "title": "Video",
+      "description": "Generated growth video",
+      "type": "object",
+      "properties": {
+        "childId": { "type": "string" },
+        "videoUrl": { "type": "string", "format": "uri" },
+        "templateUsed": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["childId", "videoUrl", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile documents"
+    },
+    "/children/{childId}": {
+      "schema": "Child",
+      "description": "Child profile documents"
+    },
+    "/photos/{photoId}": {
+      "schema": "Photo",
+      "description": "Photo documents"
+    },
+    "/videos/{videoId}": {
+      "schema": "Video",
+      "description": "Generated video documents"
+    }
+  }
+}
