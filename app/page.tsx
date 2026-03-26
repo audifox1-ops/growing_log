@@ -4,10 +4,11 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Baby, Plus, Trash2, Users, ChevronRight, X, Camera, Loader2, AlertCircle, Check, Video, Upload, Calendar, Clock, Image as ImageIcon, ChevronUp, ChevronDown, Save, Play, Music, Edit3, List, ArrowLeft
+  Baby, Plus, Trash2, Users, ChevronRight, X, Camera, Loader2, AlertCircle, Check, Video, Upload, Calendar, Clock, Image as ImageIcon, ChevronUp, ChevronDown, Save, Play, Music, Edit3, List, ArrowLeft, Sparkles
 } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import exifr from 'exifr';
+import { GoogleGenAI, Type } from "@google/genai";
 import { db, type Child, type Photo, type VideoProject } from '@/lib/db';
 import { useChildStore } from '@/lib/store';
 import { calculateAgeInMonths, formatAge } from '@/lib/utils';
@@ -23,11 +24,34 @@ export default function App() {
   // --- Local DB Data (Dexie) ---
   const children = useLiveQuery(() => db.children.toArray());
   
-  // Fetch photos for the active child, sorted by takenAt
+  // Fetch photos for the active child, sorted by takenAt (newest first)
   const photos = useLiveQuery(
-    () => activeChildId ? db.photos.where('childId').equals(activeChildId).sortBy('takenAt') : [],
+    async () => {
+      if (!activeChildId) return [];
+      const data = await db.photos.where('childId').equals(activeChildId).toArray();
+      return data.sort((a, b) => b.takenAt - a.takenAt);
+    },
     [activeChildId]
   );
+
+  // Group photos by month for the timeline
+  const groupedPhotos = useMemo(() => {
+    if (!photos) return null;
+    const groups: { monthYear: string; items: Photo[] }[] = [];
+    const monthMap: { [key: string]: Photo[] } = {};
+
+    photos.forEach(photo => {
+      const date = new Date(photo.takenAt);
+      const monthYear = date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long' });
+      if (!monthMap[monthYear]) {
+        monthMap[monthYear] = [];
+        groups.push({ monthYear, items: monthMap[monthYear] });
+      }
+      monthMap[monthYear].push(photo);
+    });
+
+    return groups;
+  }, [photos]);
 
   // Fetch video projects for the active child
   const videoProjects = useLiveQuery(
@@ -46,6 +70,7 @@ export default function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
+  const [isGeneratingCaptions, setIsGeneratingCaptions] = useState(false);
 
   // --- Video Editor State ---
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<number[]>([]);
@@ -299,6 +324,94 @@ export default function App() {
     }
   };
 
+  const generateAiCaptions = async () => {
+    if (!storyboard.length || !activeChild) return;
+    
+    setIsGeneratingCaptions(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY! });
+      
+      // Prepare parts for the prompt
+      const photoParts = await Promise.all(storyboard.map(async (item, index) => {
+        const photo = photos?.find(p => p.id === item.photoId);
+        if (!photo) return [{ text: `사진 ${index + 1}: [이미지 데이터 없음]` }];
+        
+        // Convert blob to base64
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve) => {
+          reader.onloadend = () => {
+            const base64 = (reader.result as string).split(',')[1];
+            resolve(base64);
+          };
+        });
+        reader.readAsDataURL(photo.blob);
+        const base64 = await base64Promise;
+
+        return [
+          { text: `사진 ${index + 1} (아이 나이: ${formatAge(photo.ageInMonths)}):` },
+          {
+            inlineData: {
+              data: base64,
+              mimeType: photo.mimeType
+            }
+          }
+        ];
+      }));
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        config: {
+          systemInstruction: `당신은 아이의 성장을 기록하는 감성적인 작가입니다. 
+          제공된 사진들과 아이의 나이(개월 수)를 바탕으로, 각 사진에 어울리는 짧고 감동적인 자막을 한국어로 작성해 주세요.
+          자막은 아이의 시점이나 부모의 시점에서 따뜻하게 작성되어야 합니다.
+          각 사진에 대해 하나의 문장으로 작성해 주세요.
+          응답은 반드시 사진 순서에 맞는 자막 문자열들의 JSON 배열이어야 합니다.`,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.STRING,
+              description: "사진에 대한 감성적인 자막"
+            }
+          }
+        },
+        contents: [
+          {
+            parts: [
+              { text: `아이 이름: ${activeChild.name}. 다음은 시간 순서대로 나열된 사진들입니다. 각 사진의 분위기와 아이의 연령을 고려하여 자막을 생성해 주세요.` },
+              ...photoParts.flat(),
+              { text: "모든 사진에 대한 자막을 순서대로 생성해 주세요." }
+            ]
+          }
+        ]
+      });
+
+      const responseText = response.text;
+      
+      try {
+        if (!responseText) {
+          throw new Error("AI 응답이 비어 있습니다.");
+        }
+        const captions = JSON.parse(responseText);
+        
+        if (Array.isArray(captions)) {
+          setStoryboard(prev => prev.map((item, index) => ({
+            ...item,
+            caption: captions[index] || item.caption
+          })));
+        }
+      } catch (parseErr) {
+        console.error("Failed to parse AI response:", responseText);
+        setError("AI 자막 생성 결과 해석에 실패했습니다.");
+      }
+    } catch (err) {
+      console.error("AI Generation Error:", err);
+      setError("AI 자막 생성 중 오류가 발생했습니다.");
+    } finally {
+      setIsGeneratingCaptions(false);
+    }
+  };
+
   // --- Render Helpers ---
 
   if (view === 'loading') {
@@ -470,7 +583,14 @@ export default function App() {
             </header>
 
             <main className="flex-1 p-6 max-w-6xl mx-auto w-full">
-              {!photos || photos.length === 0 ? (
+              {photos === undefined ? (
+                <div className="h-[60vh] flex items-center justify-center">
+                  <div className="flex flex-col items-center gap-4">
+                    <Loader2 className="animate-spin text-[#A7C080]" size={48} />
+                    <p className="text-[#8E8E8E] font-bold">추억을 불러오는 중...</p>
+                  </div>
+                </div>
+              ) : photos.length === 0 ? (
                 <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-6">
                   <div className="w-32 h-32 bg-white rounded-[40px] shadow-xl border border-[#A7C080]/10 flex items-center justify-center text-[#A7C080] mx-auto mb-4">
                     <ImageIcon size={64} fill="currentColor" className="opacity-10" />
@@ -483,7 +603,7 @@ export default function App() {
                   </p>
                 </div>
               ) : (
-                <div className="space-y-12 pb-32">
+                <div className="space-y-16 pb-32">
                   <div className="flex justify-between items-end">
                     <div>
                       <h1 className="text-3xl font-black text-[#4B4453]">{activeChild?.name}의 타임라인</h1>
@@ -491,61 +611,73 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Timeline Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    {photos.map((photo, index) => (
-                      <motion.div 
-                        key={photo.id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: index * 0.05 }}
-                        onClick={() => togglePhotoSelection(photo.id!)}
-                        className={`group relative bg-white rounded-[32px] overflow-hidden shadow-sm hover:shadow-xl transition-all border-4 cursor-pointer ${selectedPhotoIds.includes(photo.id!) ? 'border-[#A7C080]' : 'border-transparent'}`}
-                      >
-                        <div className="aspect-square relative">
-                          <Image 
-                            src={URL.createObjectURL(photo.blob)} 
-                            fill 
-                            className="object-cover transition-transform duration-500 group-hover:scale-110" 
-                            alt={photo.fileName} 
-                            referrerPolicy="no-referrer" 
-                          />
-                          
-                          {/* Selection Checkmark */}
-                          {selectedPhotoIds.includes(photo.id!) && (
-                            <div className="absolute inset-0 bg-[#A7C080]/20 flex items-center justify-center">
-                              <div className="w-12 h-12 bg-[#A7C080] rounded-full flex items-center justify-center text-white shadow-lg">
-                                <Check size={28} strokeWidth={4} />
+                  {/* Grouped Timeline */}
+                  {groupedPhotos?.map((group) => (
+                    <div key={group.monthYear} className="space-y-6">
+                      <div className="flex items-center gap-4">
+                        <div className="h-px flex-1 bg-[#A7C080]/20"></div>
+                        <h2 className="text-lg font-black text-[#A7C080] bg-white px-4 py-1 rounded-full border border-[#A7C080]/10 shadow-sm">
+                          {group.monthYear}
+                        </h2>
+                        <div className="h-px flex-1 bg-[#A7C080]/20"></div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        {group.items.map((photo, index) => (
+                          <motion.div 
+                            key={photo.id}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: index * 0.05 }}
+                            onClick={() => togglePhotoSelection(photo.id!)}
+                            className={`group relative bg-white rounded-[32px] overflow-hidden shadow-sm hover:shadow-xl transition-all border-4 cursor-pointer ${selectedPhotoIds.includes(photo.id!) ? 'border-[#A7C080]' : 'border-transparent'}`}
+                          >
+                            <div className="aspect-square relative">
+                              <Image 
+                                src={URL.createObjectURL(photo.blob)} 
+                                fill 
+                                className="object-cover transition-transform duration-500 group-hover:scale-110" 
+                                alt={photo.fileName} 
+                                referrerPolicy="no-referrer" 
+                              />
+                              
+                              {/* Selection Checkmark */}
+                              {selectedPhotoIds.includes(photo.id!) && (
+                                <div className="absolute inset-0 bg-[#A7C080]/20 flex items-center justify-center">
+                                  <div className="w-12 h-12 bg-[#A7C080] rounded-full flex items-center justify-center text-white shadow-lg">
+                                    <Check size={28} strokeWidth={4} />
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-4 flex flex-col justify-end">
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeletePhoto(photo.id!);
+                                  }}
+                                  className="absolute top-4 right-4 p-2 bg-white/20 backdrop-blur-md rounded-xl text-white hover:bg-red-500 transition-colors"
+                                >
+                                  <Trash2 size={18} />
+                                </button>
+                              </div>
+                              
+                              <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 backdrop-blur-md rounded-full text-[11px] font-black text-[#A7C080] shadow-sm">
+                                {formatAge(photo.ageInMonths)}
                               </div>
                             </div>
-                          )}
-
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-4 flex flex-col justify-end">
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeletePhoto(photo.id!);
-                              }}
-                              className="absolute top-4 right-4 p-2 bg-white/20 backdrop-blur-md rounded-xl text-white hover:bg-red-500 transition-colors"
-                            >
-                              <Trash2 size={18} />
-                            </button>
-                          </div>
-                          
-                          <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 backdrop-blur-md rounded-full text-[11px] font-black text-[#A7C080] shadow-sm">
-                            {formatAge(photo.ageInMonths)}
-                          </div>
-                        </div>
-                        
-                        <div className="p-4 space-y-2">
-                          <div className="flex items-center gap-2 text-[#8E8E8E] text-[11px] font-bold">
-                            <Calendar size={12} />
-                            {new Date(photo.takenAt).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })}
-                          </div>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
+                            
+                            <div className="p-4 space-y-2">
+                              <div className="flex items-center gap-2 text-[#8E8E8E] text-[11px] font-bold">
+                                <Clock size={12} />
+                                {new Date(photo.takenAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+                              </div>
+                            </div>
+                          </motion.div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </main>
@@ -637,7 +769,21 @@ export default function App() {
               <div className="max-w-4xl mx-auto space-y-8">
                 <div className="flex items-center justify-between">
                   <h2 className="text-2xl font-black text-[#4B4453]">스토리보드 구성</h2>
-                  <p className="text-[#8E8E8E] text-sm">사진을 배치하고 자막을 입력해 보세요.</p>
+                  <div className="flex items-center gap-3">
+                    <button 
+                      onClick={generateAiCaptions}
+                      disabled={isGeneratingCaptions || storyboard.length === 0}
+                      className="flex items-center gap-2 px-4 py-2 bg-white text-[#A7C080] border-2 border-[#A7C080]/20 rounded-2xl font-bold hover:border-[#A7C080] transition-all disabled:opacity-50"
+                    >
+                      {isGeneratingCaptions ? (
+                        <Loader2 size={18} className="animate-spin" />
+                      ) : (
+                        <Sparkles size={18} />
+                      )}
+                      <span>AI 자막 생성</span>
+                    </button>
+                    <p className="text-[#8E8E8E] text-sm">사진을 배치하고 자막을 입력해 보세요.</p>
+                  </div>
                 </div>
 
                 <div className="space-y-4">
