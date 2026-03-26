@@ -207,7 +207,53 @@ export default function App() {
   };
 
   /**
+   * Resizes an image file to a maximum width/height using Canvas API.
+   */
+  const resizeImage = (file: File, maxWidth: number, maxHeight: number): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const img = new window.Image();
+      img.src = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(img.src);
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height *= maxWidth / width;
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width *= maxHeight / height;
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvas context not available'));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            reject(new Error('Canvas toBlob failed'));
+          }
+        }, file.type, 0.8); // 0.8 quality for compression
+      };
+      img.onerror = () => reject(new Error('Image load failed'));
+    });
+  };
+
+  /**
    * Processes the actual upload after children are selected.
+   * Optimized for bulk upload with resizing and progress tracking.
    */
   const startUpload = async () => {
     if (!pendingFiles || uploadChildIds.length === 0) {
@@ -215,7 +261,7 @@ export default function App() {
       return;
     }
 
-    const files = pendingFiles;
+    const files = Array.from(pendingFiles);
     setPendingFiles(null);
     setIsUploadModalOpen(false);
     setIsUploading(true);
@@ -225,47 +271,62 @@ export default function App() {
     try {
       const photoEntries: Photo[] = [];
 
+      // Process files sequentially to avoid memory issues with many large images
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         
-        let takenAt: number;
         try {
-          const exif = await exifr.parse(file);
-          if (exif && exif.DateTimeOriginal) {
-            takenAt = new Date(exif.DateTimeOriginal).getTime();
-          } else {
+          // 1. Resize and compress image to manage IndexedDB storage
+          const resizedBlob = await resizeImage(file, 1920, 1920);
+          
+          // 2. Extract EXIF data
+          let takenAt: number;
+          try {
+            const exif = await exifr.parse(file);
+            if (exif && exif.DateTimeOriginal) {
+              takenAt = new Date(exif.DateTimeOriginal).getTime();
+            } else {
+              takenAt = file.lastModified;
+            }
+          } catch (exifErr) {
             takenAt = file.lastModified;
           }
-        } catch (exifErr) {
-          takenAt = file.lastModified;
+
+          // 3. Calculate age and category
+          const primaryChild = children?.find(c => c.id === uploadChildIds[0]);
+          const ageInMonths = primaryChild ? calculateAgeInMonths(primaryChild.birthDate, takenAt) : 0;
+
+          let category = '기타';
+          if (ageInMonths < 12) category = '영아기';
+          else if (ageInMonths < 36) category = '유아기';
+          else category = '아동기';
+
+          photoEntries.push({
+            childIds: uploadChildIds,
+            blob: resizedBlob,
+            fileName: file.name,
+            fileSize: resizedBlob.size,
+            mimeType: resizedBlob.type,
+            takenAt,
+            ageInMonths,
+            category,
+            createdAt: Date.now()
+          });
+        } catch (fileErr) {
+          // Log error for specific file but continue with others
+          console.error(`Error processing file ${file.name}:`, fileErr);
         }
-
-        // Calculate age based on the first selected child for categorization
-        // (In a more complex app, we might store age per child, but for now we use the primary context)
-        const primaryChild = children?.find(c => c.id === uploadChildIds[0]);
-        const ageInMonths = primaryChild ? calculateAgeInMonths(primaryChild.birthDate, takenAt) : 0;
-
-        let category = '기타';
-        if (ageInMonths < 12) category = '영아기';
-        else if (ageInMonths < 36) category = '유아기';
-        else category = '아동기';
-
-        photoEntries.push({
-          childIds: uploadChildIds, // Save as array
-          blob: file,
-          fileName: file.name,
-          fileSize: file.size,
-          mimeType: file.type,
-          takenAt,
-          ageInMonths,
-          category,
-          createdAt: Date.now()
-        });
 
         setUploadProgress(prev => ({ ...prev, current: i + 1 }));
       }
 
-      await db.photos.bulkAdd(photoEntries);
+      if (photoEntries.length > 0) {
+        // Use bulkAdd for better performance
+        await db.photos.bulkAdd(photoEntries);
+        alert(`${photoEntries.length}장의 사진이 성공적으로 업로드되었습니다.`);
+      } else {
+        setError('업로드할 수 있는 사진이 없습니다.');
+      }
       
     } catch (err: any) {
       console.error('Upload Error:', err);
