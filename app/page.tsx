@@ -115,13 +115,13 @@ export default function App() {
     
     console.log("Starting database initialization...");
 
-    // 10-second timeout promise for mobile robustness
+    // 15-second timeout promise for mobile robustness
     const timeoutPromise = new Promise((_, reject) => 
       setTimeout(() => {
-        const error = new Error('초기화 시간이 너무 오래 걸립니다 (10초 초과). 모바일 환경이나 저장 공간 부족으로 인해 발생할 수 있습니다.');
+        const error = new Error('초기화 시간이 너무 오래 걸립니다 (15초 초과). 모바일 환경이나 저장 공간 부족으로 인해 발생할 수 있습니다.');
         error.name = 'TimeoutError';
         reject(error);
-      }, 10000)
+      }, 15000)
     );
 
     // Actual initialization promise
@@ -663,6 +663,17 @@ export default function App() {
 
   // --- Render Logic ---
 
+  const handleReset = async () => {
+    if (confirm("앱의 모든 데이터(사진, 자녀 정보 등)가 삭제됩니다. 계속하시겠습니까?")) {
+      try {
+        await db.delete();
+        window.location.reload();
+      } catch (err) {
+        alert("데이터 초기화에 실패했습니다. 브라우저 설정에서 직접 데이터를 삭제해 주세요.");
+      }
+    }
+  };
+
   if (!mounted) return null;
 
   if (initError) {
@@ -682,10 +693,16 @@ export default function App() {
           </p>
           <button 
             onClick={handleRetry}
-            className="w-full bg-[#A7C080] text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-[#8FA86A] transition-all shadow-lg shadow-[#A7C080]/20"
+            className="w-full bg-[#A7C080] text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-[#8FA86A] transition-all shadow-lg shadow-[#A7C080]/20 mb-3"
           >
             <RefreshCw size={18} />
             <span>다시 시도</span>
+          </button>
+          <button 
+            onClick={handleReset}
+            className="w-full bg-white text-red-400 py-3 rounded-2xl font-medium text-xs flex items-center justify-center gap-2 border border-red-100 hover:bg-red-50 transition-all"
+          >
+            <span>데이터 초기화 및 리셋</span>
           </button>
           <p className="mt-6 text-[11px] text-[#BDBDBD]">
             지속적으로 문제가 발생하면 브라우저의 시크릿 모드를 해제하거나 쿠키 설정을 확인해 주세요.
