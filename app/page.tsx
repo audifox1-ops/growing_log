@@ -269,7 +269,8 @@ export default function App() {
       };
 
       if (editingProjectId) {
-        await db.videoProjects.update(editingProjectId, projectData);
+        // Fix for TypeScript error: use put with ID for updates to avoid UpdateSpec issues
+        await db.videoProjects.put({ ...projectData, id: editingProjectId });
       } else {
         await db.videoProjects.add(projectData);
       }
