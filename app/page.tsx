@@ -109,41 +109,93 @@ export default function App() {
   const [newProfileImage, setNewProfileImage] = useState<Blob | null>(null);
 
   // --- Initialization Logic ---
+  const initialize = useCallback(async () => {
+    setIsLoading(true);
+    setInitError(null);
+    
+    console.log("Starting database initialization...");
+
+    // 10-second timeout promise for mobile robustness
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => {
+        const error = new Error('초기화 시간이 너무 오래 걸립니다 (10초 초과). 모바일 환경이나 저장 공간 부족으로 인해 발생할 수 있습니다.');
+        error.name = 'TimeoutError';
+        reject(error);
+      }, 10000)
+    );
+
+    // Actual initialization promise
+    const initPromise = (async () => {
+      if (typeof window === 'undefined') return;
+      
+      // 1. Check IndexedDB support
+      if (!window.indexedDB) {
+        const error = new Error('이 브라우저는 로컬 데이터베이스(IndexedDB)를 지원하지 않습니다. 시크릿 모드이거나 브라우저 설정에서 차단되었을 수 있습니다.');
+        error.name = 'NotSupportedError';
+        throw error;
+      }
+
+      // 2. Try to open Dexie DB
+      console.log("Opening Dexie database...");
+      if (!db.isOpen()) {
+        try {
+          await db.open();
+        } catch (err: any) {
+          console.error("Dexie open failed:", err);
+          // Re-throw with more context if it's a known Dexie error
+          const error = new Error(err.message || '데이터베이스를 열 수 없습니다.');
+          error.name = err.name || 'OpenFailedError';
+          throw error;
+        }
+      }
+      
+      console.log("Database opened. Waiting for hooks...");
+      // 4. Small delay to ensure hooks can start fetching
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return true;
+    })();
+
+    try {
+      await Promise.race([initPromise, timeoutPromise]);
+      console.log("Database initialized successfully");
+    } catch (err: any) {
+      console.error("Critical Initialization Error:", err);
+      // Detailed error message for debugging
+      setInitError(`접속 오류가 발생했습니다. (원인: ${err.name || 'Error'} - ${err.message || '알 수 없는 오류'})`);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     setMounted(true);
     
-    const initialize = async () => {
-      try {
-        if (typeof window === 'undefined') return;
-        
-        // Check IndexedDB support (Crucial for mobile private modes)
-        if (!window.indexedDB) {
-          throw new Error('이 브라우저는 로컬 데이터베이스(IndexedDB)를 지원하지 않습니다. 최신 브라우저를 사용해 주세요.');
-        }
-
-        // Try to open Dexie DB
-        if (!db.isOpen()) {
-          await db.open();
-        }
-        console.log("Database initialized successfully");
-      } catch (err: any) {
-        console.error("Critical Initialization Error:", err);
-        setInitError("데이터베이스 초기화에 실패했습니다. 모바일 브라우저의 시크릿 모드를 해제하거나 캐시를 비우고 다시 시도해 주세요.");
-      } finally {
-        // Ensure loading state is cleared even on error
-        // We wait a bit for useLiveQuery to potentially populate children
-        setTimeout(() => {
-          setIsLoading(false);
-        }, 500);
-      }
+    // Global database event listeners
+    const handleBlocked = () => {
+      const error = new Error('다른 탭에서 데이터베이스를 사용 중입니다. 모든 탭을 닫고 다시 시도해 주세요.');
+      error.name = 'DatabaseBlockedError';
+      setInitError(`접속 오류가 발생했습니다. (원인: ${error.name} - ${error.message})`);
     };
+
+    db.on('blocked', handleBlocked);
     
     initialize();
-  }, []);
+
+    return () => {
+      db.on('blocked').unsubscribe(handleBlocked);
+    };
+  }, [initialize]);
+
+  /**
+   * Retries the initialization process without a full page reload.
+   */
+  const handleRetry = () => {
+    initialize();
+  };
 
   // Handle View Transitions based on DB data
   useEffect(() => {
-    if (!mounted || initError) return;
+    if (!mounted || initError || isLoading) return;
 
     if (children !== undefined) {
       if (children.length === 0) {
@@ -154,24 +206,8 @@ export default function App() {
           setActiveChildId(children[0].id!);
         }
       }
-      // If data is loaded, we can stop loading
-      setIsLoading(false);
     }
-  }, [mounted, children, activeChildId, setActiveChildId, initError]);
-
-  // Timeout for infinite loading (Safety net)
-  useEffect(() => {
-    if (!mounted || !isLoading || initError) return;
-    
-    const timer = setTimeout(() => {
-      if (isLoading) {
-        setInitError("초기화 시간이 너무 오래 걸립니다. 네트워크 상태를 확인하거나 브라우저를 새로고침해 주세요.");
-        setIsLoading(false);
-      }
-    }, 6000); // Shorter timeout for better UX
-    
-    return () => clearTimeout(timer);
-  }, [mounted, isLoading, initError]);
+  }, [mounted, children, activeChildId, setActiveChildId, initError, isLoading]);
 
   // --- Handlers ---
 
@@ -645,11 +681,11 @@ export default function App() {
             {initError}
           </p>
           <button 
-            onClick={() => window.location.reload()}
+            onClick={handleRetry}
             className="w-full bg-[#A7C080] text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-[#8FA86A] transition-all shadow-lg shadow-[#A7C080]/20"
           >
             <RefreshCw size={18} />
-            <span>새로고침</span>
+            <span>다시 시도</span>
           </button>
           <p className="mt-6 text-[11px] text-[#BDBDBD]">
             지속적으로 문제가 발생하면 브라우저의 시크릿 모드를 해제하거나 쿠키 설정을 확인해 주세요.
