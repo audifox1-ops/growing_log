@@ -41,6 +41,7 @@ export interface VideoProject {
     caption: string;
   }[];
   musicId?: string;
+  templateId?: string;
   status: 'draft' | 'completed';
   createdAt: number;
   updatedAt: number;

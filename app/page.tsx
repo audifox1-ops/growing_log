@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Baby, Plus, Trash2, Users, ChevronRight, X, Camera, Loader2, AlertCircle, Check, Video, Upload, Calendar, Clock, Image as ImageIcon, ChevronUp, ChevronDown, Save, Play, Music, Edit3, List, ArrowLeft, Sparkles
+  Baby, Plus, Trash2, Users, ChevronRight, X, Camera, Loader2, AlertCircle, Check, Video, Upload, Calendar, Clock, Image as ImageIcon, ChevronUp, ChevronDown, Save, Play, Music, Edit3, List, ArrowLeft, Sparkles, Layout
 } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import exifr from 'exifr';
@@ -12,6 +12,13 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { db, type Child, type Photo, type VideoProject } from '@/lib/db';
 import { useChildStore } from '@/lib/store';
 import { calculateAgeInMonths, formatAge } from '@/lib/utils';
+
+const VIDEO_TEMPLATES = [
+  { id: 'classic', name: '클래식', description: '잔잔한 페이드와 세리프 폰트', icon: '✨' },
+  { id: 'modern', name: '모던', description: '세련된 슬라이드와 고딕 폰트', icon: '📱' },
+  { id: 'cinematic', name: '시네마틱', description: '영화 같은 줌 효과와 블랙 바', icon: '🎬' },
+  { id: 'playful', name: '플레이풀', description: '통통 튀는 효과와 귀여운 폰트', icon: '🎈' },
+];
 
 /**
  * Main Application Component
@@ -73,6 +80,13 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isGeneratingCaptions, setIsGeneratingCaptions] = useState(false);
 
+  // --- Photo Edit State ---
+  const [isEditPhotoModalOpen, setIsEditPhotoModalOpen] = useState(false);
+  const [editingPhoto, setEditingPhoto] = useState<Photo | null>(null);
+  const [editCaption, setEditCaption] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editTakenAt, setEditTakenAt] = useState('');
+
   // --- Multi-Child Upload State ---
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<FileList | null>(null);
@@ -84,6 +98,7 @@ export default function App() {
   const [projectTitle, setProjectTitle] = useState('');
   const [storyboard, setStoryboard] = useState<{ photoId: number; caption: string; duration: number }[]>([]);
   const [selectedBgm, setSelectedBgm] = useState('BGM_1');
+  const [selectedTemplate, setSelectedTemplate] = useState('classic');
 
   // Form State for adding a new child
   const [newName, setNewName] = useState('');
@@ -273,6 +288,46 @@ export default function App() {
     }
   };
 
+  /**
+   * Opens the photo edit modal.
+   */
+  const handleEditPhoto = (photo: Photo) => {
+    setEditingPhoto(photo);
+    setEditCaption(photo.caption || '');
+    setEditCategory(photo.category);
+    setEditTakenAt(new Date(photo.takenAt).toISOString().split('T')[0]);
+    setIsEditPhotoModalOpen(true);
+  };
+
+  /**
+   * Updates the photo details in the database.
+   */
+  const handleUpdatePhoto = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPhoto || !editingPhoto.id) return;
+
+    try {
+      const takenAt = new Date(editTakenAt).getTime();
+      
+      // Calculate age based on the first child in the array for categorization
+      const primaryChild = children?.find(c => c.id === editingPhoto.childIds[0]);
+      const ageInMonths = primaryChild ? calculateAgeInMonths(primaryChild.birthDate, takenAt) : editingPhoto.ageInMonths;
+
+      await db.photos.update(editingPhoto.id, {
+        caption: editCaption,
+        category: editCategory,
+        takenAt,
+        ageInMonths
+      });
+
+      setIsEditPhotoModalOpen(false);
+      setEditingPhoto(null);
+    } catch (err) {
+      console.error('Update Photo Error:', err);
+      setError('사진 정보 수정 실패');
+    }
+  };
+
   // --- Video Engine Handlers ---
 
   const togglePhotoSelection = (id: number) => {
@@ -297,6 +352,7 @@ export default function App() {
     setProjectTitle(`${activeChild?.name}의 성장 기록`);
     setEditingProjectId(null);
     setSelectedBgm('BGM_1');
+    setSelectedTemplate('classic');
     setView('video-editor');
   };
 
@@ -329,6 +385,7 @@ export default function App() {
         title: projectTitle,
         scenes: storyboard,
         musicId: selectedBgm,
+        templateId: selectedTemplate,
         status: 'draft',
         createdAt: editingProjectId ? (await db.videoProjects.get(editingProjectId))?.createdAt || Date.now() : Date.now(),
         updatedAt: Date.now()
@@ -352,6 +409,7 @@ export default function App() {
     setProjectTitle(project.title);
     setStoryboard(project.scenes);
     setSelectedBgm(project.musicId || 'BGM_1');
+    setSelectedTemplate(project.templateId || 'classic');
     setView('video-editor');
   };
 
@@ -759,15 +817,26 @@ export default function App() {
                               )}
 
                               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-4 flex flex-col justify-end">
-                                <button 
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeletePhoto(photo.id!);
-                                  }}
-                                  className="absolute top-4 right-4 p-2 bg-white/20 backdrop-blur-md rounded-xl text-white hover:bg-red-500 transition-colors"
-                                >
-                                  <Trash2 size={18} />
-                                </button>
+                                <div className="absolute top-4 right-4 flex gap-2">
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleEditPhoto(photo);
+                                    }}
+                                    className="p-2 bg-white/20 backdrop-blur-md rounded-xl text-white hover:bg-[#A7C080] transition-colors"
+                                  >
+                                    <Edit3 size={18} />
+                                  </button>
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeletePhoto(photo.id!);
+                                    }}
+                                    className="p-2 bg-white/20 backdrop-blur-md rounded-xl text-white hover:bg-red-500 transition-colors"
+                                  >
+                                    <Trash2 size={18} />
+                                  </button>
+                                </div>
                               </div>
                               
                               <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 backdrop-blur-md rounded-full text-[11px] font-black text-[#A7C080] shadow-sm">
@@ -851,6 +920,18 @@ export default function App() {
                 />
               </div>
               <div className="flex gap-3">
+                <div className="flex items-center gap-2 bg-[#FDF8F5] px-4 py-2 rounded-2xl border border-[#A7C080]/10">
+                  <Layout size={18} className="text-[#A7C080]" />
+                  <select 
+                    value={selectedTemplate}
+                    onChange={(e) => setSelectedTemplate(e.target.value)}
+                    className="bg-transparent font-bold text-sm outline-none text-[#4B4453]"
+                  >
+                    {VIDEO_TEMPLATES.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
                 <div className="flex items-center gap-2 bg-[#FDF8F5] px-4 py-2 rounded-2xl border border-[#A7C080]/10">
                   <Music size={18} className="text-[#A7C080]" />
                   <select 
@@ -1167,6 +1248,89 @@ export default function App() {
               )}
             </AnimatePresence>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit Photo Modal */}
+      <AnimatePresence>
+        {isEditPhotoModalOpen && editingPhoto && (
+          <div className="fixed inset-0 bg-[#4B4453]/40 backdrop-blur-sm z-[120] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white w-full max-w-xl p-8 rounded-[40px] shadow-2xl border border-[#A7C080]/10 flex flex-col md:flex-row gap-8"
+            >
+              <div className="w-full md:w-1/2 aspect-square relative rounded-3xl overflow-hidden shrink-0 shadow-inner">
+                <Image 
+                  src={URL.createObjectURL(editingPhoto.blob)} 
+                  fill 
+                  className="object-cover" 
+                  alt="Editing" 
+                  referrerPolicy="no-referrer" 
+                />
+              </div>
+
+              <div className="flex-1 flex flex-col">
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-2xl font-bold text-[#4B4453]">사진 정보 수정</h2>
+                  <button onClick={() => setIsEditPhotoModalOpen(false)} className="text-[#8E8E8E] hover:text-[#4B4453]">
+                    <X size={24} />
+                  </button>
+                </div>
+
+                <form onSubmit={handleUpdatePhoto} className="space-y-4 flex-1">
+                  <div>
+                    <label className="block text-sm font-bold text-[#4B4453] mb-2 ml-1">촬영 날짜</label>
+                    <input
+                      type="date"
+                      required
+                      value={editTakenAt}
+                      onChange={(e) => setEditTakenAt(e.target.value)}
+                      className="w-full p-4 bg-[#FDF8F5] rounded-2xl border-none focus:ring-2 focus:ring-[#A7C080]/20 outline-none text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-[#4B4453] mb-2 ml-1">카테고리</label>
+                    <select
+                      value={editCategory}
+                      onChange={(e) => setEditCategory(e.target.value)}
+                      className="w-full p-4 bg-[#FDF8F5] rounded-2xl border-none focus:ring-2 focus:ring-[#A7C080]/20 outline-none text-sm font-medium"
+                    >
+                      <option value="영아기">영아기 (0~12개월)</option>
+                      <option value="유아기">유아기 (12~36개월)</option>
+                      <option value="아동기">아동기 (36개월~)</option>
+                      <option value="기타">기타</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-[#4B4453] mb-2 ml-1">자막 (메모)</label>
+                    <textarea
+                      value={editCaption}
+                      onChange={(e) => setEditCaption(e.target.value)}
+                      className="w-full p-4 bg-[#FDF8F5] rounded-2xl border-none focus:ring-2 focus:ring-[#A7C080]/20 outline-none text-sm h-24 resize-none"
+                      placeholder="이 순간에 대한 짧은 메모를 남겨주세요."
+                    />
+                  </div>
+                  <div className="flex gap-4 pt-4">
+                    <button 
+                      type="button" 
+                      onClick={() => setIsEditPhotoModalOpen(false)} 
+                      className="flex-1 py-4 bg-[#FDF8F5] text-[#8E8E8E] rounded-2xl font-bold hover:bg-[#F5F0E8] transition-colors"
+                    >
+                      취소
+                    </button>
+                    <button 
+                      type="submit" 
+                      className="flex-1 py-4 bg-[#A7C080] text-white rounded-2xl font-bold hover:bg-[#8FA86A] transition-colors shadow-lg shadow-[#A7C080]/20"
+                    >
+                      저장하기
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>
