@@ -221,7 +221,7 @@ export default function App() {
         const ageInMonths = activeChild ? calculateAgeInMonths(activeChild.birthDate, takenAt) : 0;
         let category = ageInMonths <= 12 ? "영아기" : ageInMonths <= 36 ? "유아기" : "아동기";
         
-        // Metadata contains mimeType which is used for contentType in storage
+        // Firestore Base64 업로드 수행
         await firebaseService.uploadPhoto(user.uid, file, { 
           childIds: uploadChildIds, 
           fileName: file.name, 
@@ -246,7 +246,7 @@ export default function App() {
   const togglePhotoSelection = (id: string) => setSelectedPhotoIds(prev => prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id]);
   const handleEditPhoto = (p: Photo) => { setEditingPhoto(p); setEditCaption(p.caption || ''); setEditCategory(p.category || ''); setEditTakenAt(new Date(p.takenAt).toISOString().split('T')[0]); setIsEditPhotoModalOpen(true); };
   const startNewVideoProject = () => { if (selectedPhotoIds.length === 0) return; setProjectTitle(`${activeChild?.name}의 보물 영상 (${new Date().toLocaleDateString()})`); setStoryboard(selectedPhotoIds.map(id => ({ photoId: id, caption: '', duration: 3 }))); setEditingProjectId(null); setView('video-editor'); };
-  const handleDeletePhoto = async (id: string) => { if (!user || !confirm('삭제하시겠습니까?')) return; const photo = photos?.find(p => p.id === id); if (!photo) return; try { await firebaseService.deletePhoto(user.uid, id, photo.storagePath); setSelectedPhotoIds(prev => prev.filter(pid => pid !== id)); } catch (err: any) { setError('삭제 실패'); } };
+  const handleDeletePhoto = async (id: string) => { if (!user || !confirm('삭제하시겠습니까?')) return; try { await firebaseService.deletePhoto(user.uid, id); setSelectedPhotoIds(prev => prev.filter(pid => pid !== id)); setIsEditPhotoModalOpen(false); setEditingPhoto(null); } catch (err: any) { setError('삭제 실패'); } };
 
   const handleUpdatePhoto = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -280,10 +280,11 @@ export default function App() {
       const photoParts = await Promise.all(storyboard.map(async (item, index) => {
         const photo = photos?.find(p => p.id === item.photoId);
         if (!photo) return [{ text: `사진 ${index + 1}: [이미지 없음]` }];
-        const response = await fetch(photo.imageUrl);
-        const imageBlob = await response.blob();
-        const base64 = await new Promise<string>(resolve => { const reader = new FileReader(); reader.onloadend = () => resolve((reader.result as string).split(',')[1]); reader.readAsDataURL(imageBlob); });
-        return [{ text: `사진 ${index + 1} (아이 연령: ${formatAge(photo.ageInMonths)}):` }, { inlineData: { data: base64, mimeType: photo.mimeType } }];
+        
+        // Base64 데이터에서 실제 데이터 부분만 추출 (data:image/jpeg;base64, 접두사 제거)
+        const base64Data = photo.imageUrl.includes(',') ? photo.imageUrl.split(',')[1] : photo.imageUrl;
+        
+        return [{ text: `사진 ${index + 1} (아이 연령: ${formatAge(photo.ageInMonths)}):` }, { inlineData: { data: base64Data, mimeType: photo.mimeType } }];
       }));
       const res = await ai.models.generateContent({ model: "gemini-3-flash-preview", config: { responseMimeType: "application/json" }, contents: [{ parts: [{ text: `아이 이름: ${activeChild.name}` }, ...photoParts.flat()] }] });
       const captions = JSON.parse(res.text || "[]");
