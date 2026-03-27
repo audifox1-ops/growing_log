@@ -6,10 +6,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Baby, Plus, Trash2, Users, ChevronRight, X, Camera, Loader2, AlertCircle, Check, Video, Upload, Calendar, Clock, Image as ImageIcon, ChevronUp, ChevronDown, Save, Play, Music, Edit3, List, ArrowLeft, Sparkles, Layout, RefreshCw
 } from 'lucide-react';
-import { useLiveQuery } from 'dexie-react-hooks';
 import exifr from 'exifr';
 import { GoogleGenAI, Type } from "@google/genai";
-import { db, type Child, type Photo, type VideoProject } from '@/lib/db';
+import { firebaseService, type Child, type Photo, type VideoProject } from '@/lib/firebase-service';
 import { useChildStore } from '@/lib/store';
 import { calculateAgeInMonths, formatAge } from '@/lib/utils';
 
@@ -31,6 +30,10 @@ const BlobImage = ({ blob, ...props }: any) => {
       setUrl(null);
       return;
     }
+    if (typeof blob === 'string') {
+      setUrl(blob);
+      return;
+    }
     const newUrl = URL.createObjectURL(blob);
     setUrl(newUrl);
     return () => URL.revokeObjectURL(newUrl);
@@ -48,50 +51,51 @@ export default function App() {
   // --- Global State (Zustand) ---
   const { activeChildId, setActiveChildId } = useChildStore();
 
-  // --- Local DB Data (Dexie) ---
-  const children = useLiveQuery(() => db.children.toArray());
-  
-  // Fetch photos for the active child, sorted by takenAt (newest first)
-  // Updated to use MultiEntry index 'childIds'
-  const photos = useLiveQuery(
-    async () => {
-      if (!activeChildId) return [];
-      const data = await db.photos.where('childIds').equals(activeChildId).toArray();
-      const sorted = data.sort((a: Photo, b: Photo) => b.takenAt - a.takenAt);
-      return sorted;
-    },
-    [activeChildId]
-  );
+  const [children, setChildren] = useState<Child[] | undefined>(undefined);
+  const [photos, setPhotos] = useState<Photo[] | undefined>(undefined);
+  const [videoProjects, setVideoProjects] = useState<VideoProject[]>([]);
 
-  // Group photos by month for the timeline
-  const groupedPhotos = useMemo(() => {
-    if (!photos) return null;
-    const groups: { monthYear: string; items: Photo[] }[] = [];
-    const monthMap: { [key: string]: Photo[] } = {};
-
-    photos.forEach(photo => {
-      const date = new Date(photo.takenAt);
-      const monthYear = date.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long' });
-      if (!monthMap[monthYear]) {
-        monthMap[monthYear] = [];
-        groups.push({ monthYear, items: monthMap[monthYear] });
-      }
-      monthMap[monthYear].push(photo);
+  // 실시간 구독 (Children)
+  useEffect(() => {
+    const unsubscribe = firebaseService.subscribeChildren((data) => {
+      setChildren(data);
     });
+    return () => unsubscribe();
+  }, []);
 
-    return groups;
-  }, [photos]);
-
-  // Fetch video projects for the active child
-  const videoProjects = useLiveQuery(
-    () => activeChildId ? db.videoProjects.where('childId').equals(activeChildId).reverse().sortBy('updatedAt') : [],
-    [activeChildId]
-  );
+  // 실시간 구독 (Photos)
+  useEffect(() => {
+    if (!activeChildId) {
+      setPhotos([]);
+      return;
+    }
+    const unsubscribe = firebaseService.subscribePhotos(activeChildId, (data) => {
+      setPhotos(data);
+    });
+    return () => unsubscribe();
+  }, [activeChildId]);
   
   const activeChild = useMemo(() => 
     children?.find(c => c.id === activeChildId) || null, 
     [children, activeChildId]
   );
+
+  const groupedPhotos = useMemo(() => {
+    if (!photos) return [];
+    const groups: { monthYear: string; items: Photo[] }[] = [];
+    const sorted = [...photos].sort((a, b) => b.takenAt - a.takenAt);
+    
+    sorted.forEach(photo => {
+      const date = new Date(photo.takenAt).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long' });
+      const lastGroup = groups[groups.length - 1];
+      if (lastGroup && lastGroup.monthYear === date) {
+        lastGroup.items.push(photo);
+      } else {
+        groups.push({ monthYear: date, items: [photo] });
+      }
+    });
+    return groups;
+  }, [photos]);
 
   // --- UI State ---
   const [mounted, setMounted] = useState(false);
@@ -114,13 +118,13 @@ export default function App() {
   // --- Multi-Child Upload State ---
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<FileList | null>(null);
-  const [uploadChildIds, setUploadChildIds] = useState<number[]>([]);
+  const [uploadChildIds, setUploadChildIds] = useState<string[]>([]);
 
   // --- Video Editor State ---
-  const [selectedPhotoIds, setSelectedPhotoIds] = useState<number[]>([]);
-  const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
+  const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [projectTitle, setProjectTitle] = useState('');
-  const [storyboard, setStoryboard] = useState<{ photoId: number; caption: string; duration: number }[]>([]);
+  const [storyboard, setStoryboard] = useState<{ photoId: string; caption: string; duration: number }[]>([]);
   const [selectedBgm, setSelectedBgm] = useState('BGM_1');
   const [selectedTemplate, setSelectedTemplate] = useState('classic');
 
@@ -133,113 +137,22 @@ export default function App() {
   const initialize = useCallback(async () => {
     setIsLoading(true);
     setInitError(null);
-    
-    console.log("Starting database initialization...");
-
-    // 30-second timeout promise for mobile robustness
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => {
-        const error = new Error('초기화 시간이 너무 오래 걸립니다 (30초 초과). 모바일 환경이나 저장 공간 부족으로 인해 발생할 수 있습니다.');
-        error.name = 'TimeoutError';
-        reject(error);
-      }, 30000)
-    );
-
-    // Actual initialization promise
-    const initPromise = (async () => {
-      if (typeof window === 'undefined') return;
-      
-      // 1. Check IndexedDB support
-      if (!window.indexedDB) {
-        const error = new Error('이 브라우저는 로컬 데이터베이스(IndexedDB)를 지원하지 않습니다. 시크릿 모드이거나 브라우저 설정에서 차단되었을 수 있습니다.');
-        error.name = 'NotSupportedError';
-        throw error;
-      }
-
-      // 2. Try to open Dexie DB
-      console.log("Opening Dexie database...");
-      if (!db.isOpen()) {
-        try {
-          await db.open();
-        } catch (err: any) {
-          console.error("Dexie open failed:", err);
-          // Re-throw with more context if it's a known Dexie error
-          const error = new Error(err.message || '데이터베이스를 열 수 없습니다.');
-          error.name = err.name || 'OpenFailedError';
-          throw error;
-        }
-      }
-      
-      console.log("Database opened. Waiting for hooks...");
-      // 4. Small delay to ensure hooks can start fetching
-      await new Promise(resolve => setTimeout(resolve, 500));
-      return true;
-    })();
-
     try {
-      await Promise.race([initPromise, timeoutPromise]);
-      console.log("Database initialized successfully");
+      setMounted(true);
+      // Firebase acts as a connection-free service here
+      setIsLoading(false);
     } catch (err: any) {
-      console.error("Critical Initialization Error:", err);
-      
-      let storageInfo = "";
-      try {
-        if (navigator.storage && navigator.storage.estimate) {
-          const estimate = await navigator.storage.estimate();
-          if (estimate.usage !== undefined && estimate.quota !== undefined) {
-            const usageMB = Math.round(estimate.usage / (1024 * 1024));
-            const quotaMB = Math.round(estimate.quota / (1024 * 1024));
-            storageInfo = ` (저장 공간 사용: ${usageMB}MB / ${quotaMB}MB)`;
-          }
-        }
-      } catch (e) {
-        console.error("Failed to estimate storage:", e);
-      }
-
-      // Detailed error message for debugging
-      setInitError(`접속 오류가 발생했습니다. (원인: ${err.name || 'Error'} - ${err.message || '알 수 없는 오류'})${storageInfo}`);
-    } finally {
+      console.error("Initialization failed:", err);
+      setInitError(err.message || '초기화 중 오류가 발생했습니다.');
       setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    setMounted(true);
-    
-    // Global database event listeners
-    const handleBlocked = () => {
-      const error = new Error('다른 탭에서 데이터베이스를 사용 중입니다. 모든 탭을 닫고 다시 시도해 주세요.');
-      error.name = 'DatabaseBlockedError';
-      setInitError(`접속 오류가 발생했습니다. (원인: ${error.name} - ${error.message})`);
-    };
-
-    db.on('blocked', handleBlocked);
-    
-    // Handle versionchange (another tab is upgrading the database)
-    const handleVersionChange = () => {
-      console.log("Database version change detected. Closing database...");
-      db.close();
-      // Reloading might help the user get the new version
-      window.location.reload();
-    };
-    db.on('versionchange', handleVersionChange);
-    
     initialize();
-
-    return () => {
-      db.on('blocked').unsubscribe(handleBlocked);
-      db.on('versionchange').unsubscribe(handleVersionChange);
-    };
   }, [initialize]);
 
-  /**
-   * Retries the initialization process without a full page reload.
-   */
-  const handleRetry = () => {
-    initialize();
-  };
-
-  // Handle View Transitions based on DB data
+  // Handle View Transitions based on Firebase data
   useEffect(() => {
     if (!mounted || initError || isLoading) return;
 
@@ -247,9 +160,8 @@ export default function App() {
       if (children.length === 0) {
         setView('onboarding');
       } else {
-        // Only set active child if not already set or invalid
         if (!activeChildId || !children.some(c => c.id === activeChildId)) {
-          setActiveChildId(children[0].id!);
+          setActiveChildId(children[0].id || null);
         }
       }
     }
@@ -257,71 +169,40 @@ export default function App() {
 
   // --- Handlers ---
 
-  /**
-   * Adds a new child profile.
-   */
   const handleAddChild = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
+    if (!newName || !newBirthDate) return;
+
     try {
-      if (!newName || !newBirthDate) throw new Error('이름과 생일을 입력해 주세요.');
-      
-      const id = await db.children.add({
+      const docRef = await firebaseService.addChild({
         name: newName,
         birthDate: newBirthDate,
-        profileImage: newProfileImage || undefined,
         createdAt: Date.now()
       });
-      
-      setActiveChildId(id);
+
+      setActiveChildId(docRef.id);
       setNewName('');
       setNewBirthDate('');
       setNewProfileImage(null);
       setShowAddProfileModal(false);
       if (view === 'onboarding') setView('dashboard');
     } catch (err: any) {
-      setError(err.message);
+      setError('프로필 생성 실패: ' + err.message);
     }
   };
 
-  /**
-   * Deletes a child profile.
-   * Updated to handle multi-child photo references.
-   */
-  const handleDeleteChild = async (id: number) => {
+  const handleDeleteChild = async (id: string) => {
     if (!confirm('이 자녀의 모든 데이터가 삭제됩니다. 계속하시겠습니까?')) return;
     try {
-      await db.transaction('rw', [db.children, db.photos, db.videoProjects], async () => {
-        // Find photos that contain this child ID in their childIds array
-        const photosToUpdate = await db.photos.where('childIds').equals(id).toArray();
-        for (const photo of photosToUpdate) {
-          const newChildIds = photo.childIds.filter(cid => cid !== id);
-          if (newChildIds.length === 0) {
-            // No more children associated with this photo, delete it
-            await db.photos.delete(photo.id!);
-          } else {
-            // Other children still associated, just update the array
-            await db.photos.update(photo.id!, { childIds: newChildIds });
-          }
-        }
-        
-        await db.videoProjects.where('childId').equals(id).delete();
-        await db.children.delete(id);
-      });
-      
-      if (activeChildId === id) {
-        const remaining = children?.filter(c => c.id !== id);
-        if (remaining && remaining.length > 0) {
-          setActiveChildId(remaining[0].id!);
-        } else {
-          setActiveChildId(null);
-          setView('onboarding');
-        }
-      }
-    } catch (err) {
-      console.error('Delete Error:', err);
-      setError('자녀 프로필 삭제 실패');
+      await firebaseService.deleteChild(id);
+      if (activeChildId === id) setActiveChildId(null);
+    } catch (err: any) {
+      setError('삭제 실패: ' + err.message);
     }
+  };
+
+  const handleRetry = () => {
+    initialize();
   };
 
   /**
@@ -413,152 +294,72 @@ export default function App() {
 
   /**
    * Processes the actual upload after children are selected.
-   * Optimized for bulk upload with resizing and progress tracking.
    */
   const startUpload = async () => {
-    console.log("startUpload called. Child IDs:", uploadChildIds);
-    if (!pendingFiles || uploadChildIds.length === 0 || !uploadChildIds[0]) {
-      console.warn("Upload aborted: No files or no target child selected.", { filesCount: pendingFiles?.length, uploadChildIds });
-      setError('업로드할 파일을 선택하거나 대상을 지정해 주세요.');
-      return;
-    }
-
-    const files = Array.from(pendingFiles) as File[];
-    console.log("Files to upload (Array):", files.map((f) => ({ name: f.name, size: f.size, type: f.type })));
+    if (!pendingFiles || uploadChildIds.length === 0) return;
     
-    if (files.length === 0) {
-      console.warn("No files in pendingFiles to upload.");
-      setIsUploadModalOpen(false);
-      setPendingFiles(null);
-      return;
-    }
-
-    setPendingFiles(null);
     setIsUploadModalOpen(false);
     setIsUploading(true);
-    setUploadProgress({ current: 0, total: files.length });
-    setError(null);
+    setUploadProgress({ current: 0, total: pendingFiles.length });
 
     try {
-      const photoEntries: Photo[] = [];
-      const failedFiles: { name: string; reason: string }[] = [];
-
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        console.log(`[${i + 1}/${files.length}] Loop Start: ${file.name}`);
+      for (let i = 0; i < pendingFiles.length; i++) {
+        const file = pendingFiles[i];
         
+        // --- Smart Metadata Extraction (exifr) ---
+        let takenAt = file.lastModified;
         try {
-          // 0. Type check with fallback
-          const fileType = file.type || '';
-          const isImageMime = fileType.startsWith('image/');
-          const extension = file.name.split('.').pop()?.toLowerCase() || '';
-          const isImageExt = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(extension);
-
-          if (!isImageMime && !isImageExt) {
-            console.warn(`Skipping non-image file: ${file.name} (Type: ${fileType}, Ext: ${extension})`);
-            throw new Error('이미지 파일이 아니거나 지원되지 않는 형식입니다.');
+          const exif = await exifr.parse(file);
+          if (exif?.DateTimeOriginal) {
+            takenAt = new Date(exif.DateTimeOriginal).getTime();
           }
-
-          // 1. Resize and compress with fallback to original if it fails (but keep HEIC error if that's what resizeImage does)
-          let processedBlob: Blob;
-          try {
-            processedBlob = await resizeImage(file, 1920, 1920);
-          } catch (resizeErr: any) {
-            // If it's a critical error like HEIC, rethrow to be caught by the outer file loop
-            if (resizeErr.message.includes('HEIC')) throw resizeErr;
-            
-            console.warn(`Resizing failed for ${file.name}. Using original file.`, resizeErr);
-            processedBlob = file; 
-          }
-          
-          // 2. Extract EXIF data
-          let takenAt: number;
-          try {
-            console.log(`Extracting EXIF for ${file.name}...`);
-            const exif = await exifr.parse(file);
-            if (exif && exif.DateTimeOriginal) {
-              takenAt = new Date(exif.DateTimeOriginal).getTime();
-              console.log(`EXIF date found: ${new Date(takenAt).toLocaleString()}`);
-            } else {
-              takenAt = file.lastModified;
-              console.log(`No EXIF date, using lastModified: ${new Date(takenAt).toLocaleString()}`);
-            }
-          } catch (exifErr) {
-            console.warn(`EXIF parsing failed for ${file.name}, using lastModified:`, exifErr);
-            takenAt = file.lastModified;
-          }
-
-          // 3. Calculate age and category
-          const primaryChild = children?.find(c => c.id === uploadChildIds[0]);
-          const ageInMonths = primaryChild ? calculateAgeInMonths(primaryChild.birthDate, takenAt) : 0;
-
-          let category = '기타';
-          if (ageInMonths < 12) category = '영아기';
-          else if (ageInMonths < 36) category = '유아기';
-          else category = '아동기';
-
-          photoEntries.push({
-            childIds: uploadChildIds,
-            blob: processedBlob,
-            fileName: file.name,
-            fileSize: processedBlob.size,
-            mimeType: processedBlob.type,
-            takenAt,
-            ageInMonths,
-            category,
-            createdAt: Date.now()
-          });
-        } catch (fileErr: any) {
-          console.error(`Error processing file ${file.name}:`, fileErr);
-          failedFiles.push({ name: file.name, reason: fileErr.message || '처리 오류' });
+        } catch (e) {
+          console.warn("EXIF extraction failed for", file.name, e);
         }
+
+        const ageInMonths = calculateAgeInMonths(activeChild!.birthDate, takenAt);
+        
+        let category = "기타";
+        if (ageInMonths <= 12) category = "영아기";
+        else if (ageInMonths <= 36) category = "유아기";
+        else category = "아동기";
+
+        // --- Firebase Upload ---
+        await firebaseService.uploadPhoto(file, {
+          childIds: uploadChildIds,
+          fileName: file.name,
+          fileSize: file.size,
+          mimeType: file.type,
+          takenAt,
+          ageInMonths,
+          category,
+          createdAt: Date.now()
+        });
 
         setUploadProgress(prev => ({ ...prev, current: i + 1 }));
       }
-
-      console.log(`Processing finished. Successful: ${photoEntries.length}, Failed: ${failedFiles.length}`);
-
-      if (failedFiles.length > 0) {
-        const failMessage = failedFiles.map(f => `- ${f.name}: ${f.reason}`).join('\n');
-        alert(`${failedFiles.length}개의 파일 처리에 실패했습니다. 다음 파일을 확인해 주세요:\n${failMessage}`);
-      }
-
-      if (photoEntries.length > 0) {
-        try {
-          await db.photos.bulkAdd(photoEntries);
-          console.log("Database save successful!");
-          alert(`${photoEntries.length}장의 사진이 성공적으로 업로드되었습니다.`);
-        } catch (dbErr: any) {
-          console.error("Database BulkAdd Error:", dbErr);
-          if (dbErr.name === 'QuotaExceededError' || dbErr.message?.includes('Quota')) {
-            throw new Error('저장 공간이 부족합니다. 브라우저 저장 용량을 확인하거나 일부 사진을 삭제해 주세요.');
-          } else {
-            throw new Error(`데이터베이스 저장 실패: ${dbErr.message || '알 수 없는 오류'}`);
-          }
-        }
-      } else if (files.length > 0) {
-        const timestamp = new Date().toLocaleTimeString();
-        setError(`업로드할 수 있는 사진이 없습니다. (에러_${timestamp})`);
-      }
-      
+      alert(`${pendingFiles.length}장의 사진이 성공적으로 업로드되었습니다.`);
     } catch (err: any) {
-      console.error('Final Upload Error Handler:', err);
-      setError(err.message || '사진 업로드 중 오류가 발생했습니다.');
+      setError('업로드 중 오류 발생: ' + err.message);
     } finally {
       setIsUploading(false);
+      setPendingFiles(null);
+      setUploadChildIds([]);
     }
   };
 
   /**
    * Deletes a specific photo.
    */
-  const handleDeletePhoto = async (id: number) => {
+  const handleDeletePhoto = async (id: string) => {
     if (!confirm('이 사진을 삭제하시겠습니까?')) return;
+    const photo = photos?.find(p => p.id === id);
+    if (!photo) return;
     try {
-      await db.photos.delete(id);
+      await firebaseService.deletePhoto(id, (photo as any).storagePath);
       setSelectedPhotoIds(prev => prev.filter(pid => pid !== id));
-    } catch (err) {
-      setError('사진 삭제 실패');
+    } catch (err: any) {
+      setError('사진 삭제 실패: ' + err.message);
     }
   };
 
@@ -587,7 +388,7 @@ export default function App() {
       const primaryChild = children?.find(c => c.id === editingPhoto.childIds[0]);
       const ageInMonths = primaryChild ? calculateAgeInMonths(primaryChild.birthDate, takenAt) : editingPhoto.ageInMonths;
 
-      await db.photos.update(editingPhoto.id, {
+      await firebaseService.updatePhoto(editingPhoto.id, {
         caption: editCaption,
         category: editCategory,
         takenAt,
@@ -596,16 +397,16 @@ export default function App() {
 
       setIsEditPhotoModalOpen(false);
       setEditingPhoto(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Update Photo Error:', err);
-      setError('사진 정보 수정 실패');
+      setError('사진 정보 수정 실패: ' + err.message);
     }
   };
 
   // --- Video Engine Handlers ---
 
-  const togglePhotoSelection = (id: number) => {
-    setSelectedPhotoIds(prev => 
+  const togglePhotoSelection = (id: string) => {
+    setSelectedPhotoIds((prev: string[]) => 
       prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id]
     );
   };
@@ -654,27 +455,27 @@ export default function App() {
     }
 
     try {
-      const projectData: VideoProject = {
+      const projectData: Omit<VideoProject, 'id'> = {
         childId: activeChildId,
         title: projectTitle,
         scenes: storyboard,
         musicId: selectedBgm,
         templateId: selectedTemplate,
         status: 'draft',
-        createdAt: editingProjectId ? (await db.videoProjects.get(editingProjectId))?.createdAt || Date.now() : Date.now(),
+        createdAt: Date.now(), // Simplified: Use current time for new, or maintain with update method
         updatedAt: Date.now()
       };
 
       if (editingProjectId) {
-        await db.videoProjects.put({ ...projectData, id: editingProjectId });
+        await firebaseService.updateVideoProject(editingProjectId, projectData);
       } else {
-        await db.videoProjects.add(projectData);
+        await firebaseService.saveVideoProject(projectData);
       }
 
       setView('video-list');
       setSelectedPhotoIds([]);
-    } catch (err) {
-      setError('프로젝트 저장 실패');
+    } catch (err: any) {
+      setError('프로젝트 저장 실패: ' + err.message);
     }
   };
 
@@ -687,12 +488,12 @@ export default function App() {
     setView('video-editor');
   };
 
-  const deleteProject = async (id: number) => {
+  const deleteProject = async (id: string) => {
     if (!confirm('이 프로젝트를 삭제하시겠습니까?')) return;
     try {
-      await db.videoProjects.delete(id);
-    } catch (err) {
-      setError('프로젝트 삭제 실패');
+      await firebaseService.deleteVideoProject(id);
+    } catch (err: any) {
+      setError('프로젝트 삭제 실패: ' + err.message);
     }
   };
 
@@ -708,6 +509,10 @@ export default function App() {
         const photo = photos?.find(p => p.id === item.photoId);
         if (!photo) return [{ text: `사진 ${index + 1}: [이미지 데이터 없음]` }];
         
+        // Fetch image as blob from URL for AI processing
+        const response = await fetch(photo.imageUrl);
+        const imageBlob = await response.blob();
+        
         // Convert blob to base64
         const reader = new FileReader();
         const base64Promise = new Promise<string>((resolve) => {
@@ -716,7 +521,7 @@ export default function App() {
             resolve(base64);
           };
         });
-        reader.readAsDataURL(photo.blob);
+        reader.readAsDataURL(imageBlob);
         const base64 = await base64Promise;
 
         return [
@@ -787,13 +592,8 @@ export default function App() {
   // --- Render Logic ---
 
   const handleReset = async () => {
-    if (confirm("앱의 모든 데이터(사진, 자녀 정보 등)가 삭제됩니다. 계속하시겠습니까?")) {
-      try {
-        await db.delete();
-        window.location.reload();
-      } catch (err) {
-        alert("데이터 초기화에 실패했습니다. 브라우저 설정에서 직접 데이터를 삭제해 주세요.");
-      }
+    if (confirm("서버의 데이터는 유지되지만 로컬 상태가 초기화됩니다. 계속하시겠습니까?")) {
+      window.location.reload();
     }
   };
 
@@ -934,14 +734,14 @@ export default function App() {
                       className="hidden"
                       checked={uploadChildIds.includes(child.id!)}
                       onChange={() => {
-                        setUploadChildIds((prev: number[]) => 
-                          prev.includes(child.id!) ? prev.filter((id: number) => id !== child.id) : [...prev, child.id!]
+                        setUploadChildIds((prev: string[]) => 
+                          prev.includes(child.id!) ? prev.filter((id: string) => id !== child.id) : [...prev, child.id!]
                         );
                       }}
                     />
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white overflow-hidden relative ${uploadChildIds.includes(child.id!) ? 'bg-[#A7C080]' : 'bg-[#E5E5E5]'}`}>
-                      {child.profileImage ? (
-                        <BlobImage blob={child.profileImage} fill className="object-cover" alt="Profile" referrerPolicy="no-referrer" />
+                      {child.profileImageUrl ? (
+                        <BlobImage blob={child.profileImageUrl} fill className="object-cover" alt="Profile" referrerPolicy="no-referrer" />
                       ) : (
                         <Baby size={20} fill="currentColor" />
                       )}
@@ -1042,8 +842,8 @@ export default function App() {
                   className="flex items-center gap-3 bg-[#FDF8F5] hover:bg-[#F5F0E8] p-2 pr-4 rounded-2xl transition-all border border-[#A7C080]/10"
                 >
                   <div className="w-10 h-10 bg-[#A7C080] rounded-xl flex items-center justify-center text-white overflow-hidden relative">
-                    {activeChild?.profileImage ? (
-                      <BlobImage blob={activeChild.profileImage} fill className="object-cover" alt="Profile" referrerPolicy="no-referrer" />
+                    {activeChild?.profileImageUrl ? (
+                      <BlobImage blob={activeChild.profileImageUrl} fill className="object-cover" alt="Profile" referrerPolicy="no-referrer" />
                     ) : (
                       <Baby size={20} fill="currentColor" />
                     )}
@@ -1130,7 +930,7 @@ export default function App() {
                           >
                             <div className="aspect-square relative">
                               <BlobImage 
-                                blob={photo.blob} 
+                                blob={photo.imageUrl} 
                                 fill 
                                 className="object-cover transition-transform duration-500 group-hover:scale-110" 
                                 alt={photo.fileName} 
@@ -1320,7 +1120,7 @@ export default function App() {
                           {index + 1}
                         </div>
                         <div className="w-32 h-32 relative rounded-2xl overflow-hidden shrink-0">
-                          <BlobImage blob={photo.blob} fill className="object-cover" alt="Scene" referrerPolicy="no-referrer" />
+                          <BlobImage blob={photo.imageUrl} fill className="object-cover" alt="Scene" referrerPolicy="no-referrer" />
                           <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 rounded-lg text-[10px] font-black text-[#A7C080]">
                             {formatAge(photo.ageInMonths)}
                           </div>
@@ -1479,8 +1279,8 @@ export default function App() {
                     }}
                   >
                     <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white overflow-hidden relative ${activeChildId === child.id ? 'bg-[#A7C080]' : 'bg-[#E5E5E5]'}`}>
-                      {child.profileImage ? (
-                        <BlobImage blob={child.profileImage} fill className="object-cover" alt="Profile" referrerPolicy="no-referrer" />
+                      {child.profileImageUrl ? (
+                        <BlobImage blob={child.profileImageUrl} fill className="object-cover" alt="Profile" referrerPolicy="no-referrer" />
                       ) : (
                         <Baby size={28} fill="currentColor" />
                       )}
@@ -1595,7 +1395,7 @@ export default function App() {
             >
               <div className="w-full md:w-1/2 aspect-square relative rounded-3xl overflow-hidden shrink-0 shadow-inner">
                 <BlobImage 
-                  blob={editingPhoto.blob} 
+                  blob={editingPhoto.imageUrl} 
                   fill 
                   className="object-cover" 
                   alt="Editing" 

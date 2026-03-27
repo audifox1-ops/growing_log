@@ -6,8 +6,8 @@ import { persist } from 'zustand/middleware';
  * Uses persistence to remember the selected child across page reloads.
  */
 interface ChildStore {
-  activeChildId: number | null;
-  setActiveChildId: (id: number | null) => void;
+  activeChildId: string | null;
+  setActiveChildId: (id: string | null) => void;
 }
 
 export const useChildStore = create<ChildStore>()(
