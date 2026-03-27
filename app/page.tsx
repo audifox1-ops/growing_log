@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Image from 'next/image';
@@ -78,10 +78,7 @@ export default function App() {
   // --- UI & Lifecycle State ---
   const [mounted, setMounted] = useState(false);
   
-  /**
-   * [FIX] isLoading 초기값을 false로 설정하여 버튼이 즉시 렌더링되게 합니다.
-   * 비동기 로그인 작업 시에만 true로 변경됩니다.
-   */
+  // [강제 고정] isLoading은 기본적으로 false로 시작하며, 로그인 버튼의 disabled 여부에 영향을 주지 않도록 강제 해제합니다.
   const [isLoading, setIsLoading] = useState(false);
   const [view, setView] = useState<'onboarding' | 'dashboard' | 'profiles' | 'video-editor' | 'video-list'>('dashboard');
   const [error, setError] = useState<string | null>(null);
@@ -122,15 +119,15 @@ export default function App() {
 
     const checkRedirectResult = async () => {
       try {
-        console.log("--- [Debug] 리다이렉트 결과 확인 시작 ---");
+        console.log("--- [Debug] 리다이렉트 결과 체크 시작 ---");
         const result = await getRedirectResult(auth);
         if (result?.user) {
-          console.log("--- [Debug] 로그인 성공 확인 (리다이렉트 결과):", result.user.displayName);
+          console.log("--- [Debug] 리다이렉트 결과 성공 확인됨:", result.user.displayName);
         }
       } catch (err: any) {
-        console.error("--- [Error] 리다이렉트 인증 에러 발생 ---", err);
+        console.error("--- [Error] 리다이렉트 처리 에러 ---", err);
         if (err.code === 'auth/cross-origin-opener-policy-blocked') {
-          console.warn("--- [Debug] COOP 정책에 의해 차단됨 (무시 가능) ---");
+          console.warn("--- [Debug] COOP 차단 감치 (상태 리스너가 이를 대체합니다) ---");
         } else {
           setError("로그인 처리 중 오류가 발생했습니다: " + err.message);
         }
@@ -142,7 +139,7 @@ export default function App() {
     checkRedirectResult();
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      console.log("--- [Debug] Auth 상태 변경:", currentUser?.displayName || "Guest");
+      console.log("--- [Debug] 인증 상태 변경 완료:", currentUser?.displayName || "Guest");
       setUser(currentUser);
       setAuthLoading(false);
       setMounted(true);
@@ -222,18 +219,20 @@ export default function App() {
   // --- Handlers ---
 
   const handleLogin = async () => {
-    console.log("--- [Debug] handleLogin 실행됨 (이전 isLoading: " + isLoading + ") ---");
+    console.log("--- [Debug] handleLogin 함수 진입 성공 ---");
+    // [보안] 디버깅을 위해 alert를 띄웁니다.
+    alert('로그인 시퀀스가 시작됩니다. 브라우저가 이동합니다.');
+    
     try {
       setIsLoading(true);
-      if (!auth || !googleProvider) throw new Error("Firebase Auth/Provider가 초기화되지 않았습니다.");
-      
-      console.log("--- [Debug] signInWithRedirect 호출 직전 ---");
+      console.log("--- [Debug] signInWithRedirect 실행 시도 ---");
       await signInWithRedirect(auth, googleProvider);
-      console.log("--- [Debug] signInWithRedirect 호출 완료 (리다이렉트 대기) ---");
     } catch (err: any) {
-      console.error("--- [Error] 로그인 프로세스 중단 ---", err);
+      console.error("--- [Error] 로그인 핸들러 내 에러 발생 ---", err);
       setError('로그인 시도 중 오류가 발생했습니다: ' + err.message);
+    } finally {
       setIsLoading(false);
+      console.log("--- [Debug] handleLogin 함수 종료 ---");
     }
   };
 
@@ -244,7 +243,7 @@ export default function App() {
       setView('dashboard');
       setActiveChildId(null);
     } catch (err: any) {
-      console.error("--- [Error] 로그아웃 에러 ---", err);
+      console.error("--- [Error] 로그아웃 실패 ---", err);
       setError('로그아웃 중 오류가 발생했습니다.');
     }
   };
@@ -266,7 +265,7 @@ export default function App() {
       setShowAddProfileModal(false);
       if (view === 'onboarding') setView('dashboard');
     } catch (err: any) {
-      console.error("--- [Error] 자녀 추가 실패 ---", err);
+      console.error("--- [Error] 자녀 프로필 추가 에러 ---", err);
       setError('아이 추가 실패: ' + err.message);
     } finally {
       setIsLoading(false);
@@ -279,7 +278,7 @@ export default function App() {
       await firebaseService.deleteChild(user.uid, id);
       if (activeChildId === id) setActiveChildId(null);
     } catch (err: any) {
-      console.error("--- [Error] 자녀 삭제 실패 ---", err);
+      console.error("--- [Error] 자녀 삭제 에러 ---", err);
       setError('삭제 실패: ' + err.message);
     }
   };
@@ -341,7 +340,7 @@ export default function App() {
       await Promise.all(uploadTasks);
       alert(`${pendingFiles.length}장의 사진이 안전하게 클라우드에 저장되었습니다.`);
     } catch (err: any) {
-      console.error("--- [Error] 업로드 실패 ---", err);
+      console.error("--- [Error] 업로드 처리 에러 ---", err);
       setError('업로드 중 오류가 발생했습니다: ' + err.message);
     } finally {
       setIsUploading(false);
@@ -384,7 +383,7 @@ export default function App() {
       await firebaseService.deletePhoto(user.uid, id, photo.storagePath);
       setSelectedPhotoIds(prev => prev.filter(pid => pid !== id));
     } catch (err: any) {
-      console.error("--- [Error] 삭제 실패 ---", err);
+      console.error("--- [Error] 사진 삭제 실패 ---", err);
       setError('삭제 실패: ' + err.message);
     }
   };
@@ -407,7 +406,7 @@ export default function App() {
       setIsEditPhotoModalOpen(false);
       setEditingPhoto(null);
     } catch (err: any) {
-      console.error("--- [Error] 업데이트 실패 ---", err);
+      console.error("--- [Error] 사진 수정 실패 ---", err);
       setError('수정 실패: ' + err.message);
     }
   };
@@ -438,7 +437,7 @@ export default function App() {
       setView('video-list');
       setSelectedPhotoIds([]);
     } catch (err: any) {
-      console.error("--- [Error] 프로젝트 저장 실패 ---", err);
+      console.error("--- [Error] 비디오 프로젝트 저장 에러 ---", err);
       setError('프로젝트 저장 실패: ' + err.message);
     } finally {
       setIsLoading(false);
@@ -450,7 +449,7 @@ export default function App() {
     try {
       await firebaseService.deleteVideoProject(user.uid, id);
     } catch (err: any) {
-      console.error("--- [Error] 비디오 삭제 실패 ---", err);
+      console.error("--- [Error] 프로젝트 삭제 실패 ---", err);
       setError('프로젝트 삭제 실패: ' + err.message);
     }
   };
@@ -501,7 +500,7 @@ export default function App() {
         })));
       }
     } catch (err) {
-      console.error("--- [Error] AI 자막 생성 에러 ---", err);
+      console.error("--- [Error] AI 자막 생성 중단 ---", err);
       setError("AI 자막 생성 중 오류가 발생했습니다.");
     } finally {
       setIsGeneratingCaptions(false);
@@ -511,10 +510,33 @@ export default function App() {
   // --- Views ---
 
   const LoginView = () => (
-    /**
-     * [FIX] z-index를 부여하고 불필요한 레이어 차단을 막기 위해 pointer-events를 설정합니다.
-     */
-    <div className="min-h-screen flex items-center justify-center bg-[#FDF8F5] p-6 relative z-10">
+    <div className="min-h-screen flex items-center justify-center bg-[#FDF8F5] p-6 relative z-10 overflow-hidden">
+      {/* [강제 디버깅 버튼] 레이어 문제 확인용 */}
+      <button 
+        type="button"
+        onClick={() => {
+          console.log("--- [Debug] 테스트 상자 열기(Red Button) 클릭됨 ---");
+          alert('--- [Debug] 테스트 상자 열기 클릭됨 (JS 동작 중) ---');
+          handleLogin();
+        }}
+        style={{ 
+          position: 'fixed', 
+          top: '20px', 
+          left: '20px', 
+          zIndex: 99999, 
+          padding: '24px', 
+          background: 'red', 
+          color: 'white', 
+          fontWeight: 'bold', 
+          borderRadius: '16px',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.3)',
+          border: '4px solid white',
+          cursor: 'pointer'
+        }}
+      >
+        테스트 상자 열기 (클릭 확인용)
+      </button>
+
       <motion.div 
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -532,35 +554,40 @@ export default function App() {
         </div>
         
         <div className="relative z-30">
-          {isLoading ? (
-            <div className="flex justify-center flex-col items-center gap-4 py-4">
-              <Loader2 className="animate-spin text-[#A7C080]" size={32} />
-              <p className="text-xs text-gray-400 font-bold">인증 처리 중...</p>
-              <button 
-                onClick={() => setIsLoading(false)} 
-                className="text-[10px] text-gray-300 underline mt-2 hover:text-[#A7C080] transition-colors"
-                type="button"
-              >
-                로딩이 너무 길다면 클릭하여 중단
-              </button>
-            </div>
-          ) : (
+          {/* [DEBUG] 로딩 중이더라도 버튼이 아예 사라지지 않게 처리하여 하이드레이션 오류를 방지합니다. */}
+          <div className="space-y-4">
+            {isLoading && (
+              <div className="flex justify-center flex-col items-center gap-4 py-4 animate-pulse">
+                <Loader2 className="animate-spin text-[#A7C080]" size={32} />
+                <p className="text-xs text-gray-400 font-black uppercase tracking-widest">인증 처리 중...</p>
+              </div>
+            )}
+            
             <button 
               type="button"
               onClick={handleLogin}
-              /**
-               * [FIX] 최상위 z-index 부여 및 pointer-events 강제 허용
-               */
-              className="w-full relative z-[100] pointer-events-auto flex items-center justify-center gap-4 bg-white border-2 border-[#E5E5E5] hover:border-[#A7C080] py-5 rounded-2xl font-bold text-[#4B4453] transition-all group active:scale-95 shadow-sm hover:shadow-md"
+              // [FIX] Disabled를 강제로 false로 고정하여 상태 수렁에서 벗어납니다.
+              disabled={false}
+              className="w-full relative z-[100] pointer-events-auto flex items-center justify-center gap-4 bg-white border-2 border-[#E5E5E5] hover:border-[#A7C080] py-5 rounded-3xl font-black text-[#4B4453] transition-all group active:scale-95 shadow-sm hover:shadow-xl"
             >
               <Image 
                 src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" 
                 width={24} height={24} alt="Google" 
                 className="pointer-events-none"
               />
-              <span className="pointer-events-none text-lg">상자 열기</span>
+              <span className="pointer-events-none text-xl">상자 열기</span>
             </button>
-          )}
+            
+            {isLoading && (
+              <button 
+                onClick={() => setIsLoading(false)} 
+                className="w-full text-[11px] text-gray-300 underline font-bold hover:text-red-400 transition-colors"
+                type="button"
+              >
+                로딩이 너무 길다면 클릭하여 중단
+              </button>
+            )}
+          </div>
         </div>
         
         <p className="text-[11px] text-[#BDBDBD] pointer-events-none">구글 로그인 시 모든 기기에서 데이터가 실시간 동기화됩니다.</p>
@@ -572,11 +599,11 @@ export default function App() {
 
   if (!mounted || authLoading) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-[#FDF8F5]">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#FDF8F5] relative z-[9999]">
         <motion.div animate={{ scale: [1, 1.1, 1] }} transition={{ repeat: Infinity, duration: 2 }}>
           <Baby size={48} className="text-[#A7C080]" />
         </motion.div>
-        <p className="mt-4 text-[#8E8E8E] font-bold">환경을 준비 중입니다...</p>
+        <p className="mt-4 text-[#8E8E8E] font-black uppercase tracking-widest text-xs">보물상자 준비 중...</p>
       </div>
     );
   }
@@ -774,7 +801,7 @@ export default function App() {
                               <div className="flex justify-between items-center"><span className="text-[10px] font-black text-[#A7C080] uppercase tracking-widest">Scene {index + 1}</span><div className="flex items-center gap-2 text-[10px] text-gray-400 font-bold"><Clock size={12} /> {item.duration}s</div></div>
                               <textarea value={item.caption} onChange={e => { const n = [...storyboard]; n[index].caption = e.target.value; setStoryboard(n); }} className="w-full p-4 bg-white rounded-2xl outline-none text-sm h-28 resize-none border border-transparent focus:border-[#A7C080]/30 shadow-sm" placeholder="여기에 추억의 자막을 적어주세요." />
                            </div>
-                           <button onClick={() => setStoryboard(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 p-2 bg-white text-gray-300 hover:text-red-400 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-all border border-gray-100"><Trash2 size={16} /></button>
+                           <button onClick={() => setStoryboard(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 p-2 bg-white text-gray-200 hover:text-red-400 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-all border border-gray-100"><Trash2 size={16} /></button>
                          </motion.div>
                        );
                     })}
