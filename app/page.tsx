@@ -23,7 +23,7 @@ const VIDEO_TEMPLATES = [
 /**
  * BlobImage Component: Manages Blob URLs to prevent memory leaks.
  */
-const BlobImage = ({ blob, src: _src, ...props }: { blob: Blob | undefined | null } & React.ComponentProps<typeof Image>) => {
+const BlobImage = ({ blob, ...props }: any) => {
   const [url, setUrl] = useState<string | null>(null);
 
   useEffect(() => {
