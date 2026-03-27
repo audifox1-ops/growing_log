@@ -241,12 +241,6 @@ export default function App() {
     }
   };
 
-  /**
-   * [FIX] 자녀 프로필 추가 핸들러 개선
-   * - 디버깅 로그 추가
-   * - e.preventDefault() 보장
-   * - Firestore 저장 로직 강화
-   */
   const handleAddChild = async (e: React.FormEvent) => {
     if (e) e.preventDefault();
     console.log("--- [Debug] 프로필 생성 버튼 클릭됨 (handleAddChild 실행) ---");
@@ -272,7 +266,6 @@ export default function App() {
       setNewBirthDate('');
       setShowAddProfileModal(false);
       
-      // 온보딩 뷰인 경우 대시보드로 즉시 이동
       if (view === 'onboarding') {
         console.log("--- [Debug] 온보딩 완료. 대시보드로 이동합니다.");
         setView('dashboard');
@@ -638,7 +631,8 @@ export default function App() {
               <div className="space-y-3 mb-8">
                 {children?.map(child => (
                   <label key={child.id} className={`flex items-center gap-4 p-4 rounded-2xl border-2 cursor-pointer transition-all ${uploadChildIds.includes(child.id!) ? 'border-[#A7C080] bg-[#A7C080]/5' : 'border-[#FDF8F5] bg-[#FDF8F5]'}`}>
-                    <input type="checkbox" className="hidden" checked={uploadChildIds.includes(child.id!)} onChange={() => setUploadChildIds(prev => prev.includes(child.id!) ? prev.filter(id => id !== child.id) : [...prev, id!])} />
+                    {/* [FIX] Vercel 타입 오류(Cannot find name 'id') 해결: [...prev, id!] -> [...prev, child.id!] */}
+                    <input type="checkbox" className="hidden" checked={uploadChildIds.includes(child.id!)} onChange={() => setUploadChildIds(prev => prev.includes(child.id!) ? prev.filter(id => id !== child.id) : [...prev, child.id!])} />
                     <div className="w-10 h-10 bg-[#A7C080] rounded-xl flex items-center justify-center text-white font-bold">{child.name[0]}</div>
                     <span className="font-bold flex-1">{child.name}</span>
                     {uploadChildIds.includes(child.id!) && <Check size={20} className="text-[#A7C080]" />}
@@ -693,9 +687,6 @@ export default function App() {
                    <button 
                      type="submit" 
                      disabled={isLoading}
-                     /**
-                      * [FIX] z-index와 pointer-events를 부여하여 클릭 가로챔을 방지합니다.
-                      */
                      className="w-full relative z-[50] pointer-events-auto bg-[#A7C080] text-white py-5 rounded-[28px] font-black shadow-lg hover:shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-70"
                    >
                      {isLoading ? (
