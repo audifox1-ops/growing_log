@@ -99,8 +99,8 @@ export const firebaseService = {
     const storagePath = `images/${userId}/${timestamp}_${metadata.fileName}`;
     const fileRef = ref(storage, storagePath);
 
-    // 1. Upload to Firebase Storage
-    await uploadBytes(fileRef, file);
+    // 1. Upload to Firebase Storage with explicit metadata (fixes CORS/Preflight issues)
+    await uploadBytes(fileRef, file, { contentType: metadata.mimeType });
     const imageUrl = await getDownloadURL(fileRef);
 
     // 2. Save Metadata to Firestore Sub-collection
@@ -174,7 +174,10 @@ export const firebaseService = {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Child));
         callback(data);
       },
-      (error) => {
+      (error: any) => {
+        if (error.code === 'failed-precondition' || error.message.includes('index')) {
+          console.warn("--- [Action Required] Firestore 색인 생성이 필요합니다. Firebase Console의 에러 링크를 확인해 주세요. ---");
+        }
         console.error(`Children Subscription Error for users/${userId}:`, error);
       }
     );
@@ -196,7 +199,10 @@ export const firebaseService = {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Photo));
         callback(data);
       },
-      (error) => {
+      (error: any) => {
+        if (error.code === 'failed-precondition' || error.message.includes('index')) {
+          console.warn("--- [Action Required] Firestore 색인 생성이 필요합니다. Firebase Console의 에러 링크를 확인해 주세요. ---");
+        }
         console.error(`Photos Subscription Error for users/${userId}/photos:`, error);
       }
     );
@@ -217,7 +223,10 @@ export const firebaseService = {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as VideoProject));
         callback(data);
       },
-      (error) => {
+      (error: any) => {
+        if (error.code === 'failed-precondition' || error.message.includes('index')) {
+          console.warn("--- [Action Required] Firestore 색인 생성이 필요합니다. Firebase Console의 에러 링크를 확인해 주세요. ---");
+        }
         console.error(`VideoProjects Subscription Error for users/${userId}/videoProjects:`, error);
       }
     );

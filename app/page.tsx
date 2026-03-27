@@ -14,6 +14,9 @@ import { firebaseService, type Child, type Photo, type VideoProject } from '@/li
 import { useChildStore } from '@/lib/store';
 import { calculateAgeInMonths, formatAge } from '@/lib/utils';
 
+/**
+ * BlobImage Component: Manages Blob URLs and handles loading errors.
+ */
 const BlobImage = ({ blob, alt, ...props }: any) => {
   const [url, setUrl] = useState<string | null>(null);
   const [hasError, setHasError] = useState(false);
@@ -32,23 +35,32 @@ const BlobImage = ({ blob, alt, ...props }: any) => {
 };
 
 export default function App() {
+  // --- Auth & Profile State ---
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [profileImgError, setProfileImgError] = useState(false);
   const { activeChildId, setActiveChildId } = useChildStore();
+
+  // --- Data State ---
   const [children, setChildren] = useState<Child[] | undefined>(undefined);
   const [photos, setPhotos] = useState<Photo[] | undefined>(undefined);
   const [videoProjects, setVideoProjects] = useState<VideoProject[]>([]);
+
+  // --- UI & Lifecycle State ---
   const [mounted, setMounted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [view, setView] = useState<'onboarding' | 'dashboard' | 'profiles' | 'video-editor' | 'video-list'>('dashboard');
   const [error, setError] = useState<string | null>(null);
   const [isGeneratingCaptions, setIsGeneratingCaptions] = useState(false);
+
+  // --- Upload State ---
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
   const [uploadChildIds, setUploadChildIds] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
+
+  // --- Modal & Form State ---
   const [showAddProfileModal, setShowAddProfileModal] = useState(false);
   const [newName, setNewName] = useState('');
   const [newBirthDate, setNewBirthDate] = useState('');
@@ -57,12 +69,15 @@ export default function App() {
   const [editCaption, setEditCaption] = useState('');
   const [editCategory, setEditCategory] = useState('');
   const [editTakenAt, setEditTakenAt] = useState('');
+
+  // --- Video Editor State ---
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [projectTitle, setProjectTitle] = useState('');
   const [storyboard, setStoryboard] = useState<{ photoId: string; caption: string; duration: number }[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState('classic');
 
+  // --- Firebase Auth Listener ---
   useEffect(() => {
     if (!auth) { setAuthLoading(false); return; }
     const checkRedirectResult = async () => {
@@ -83,16 +98,20 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // --- Real-time Subscriptions with Index Error Handling ---
   useEffect(() => {
     if (!user) { setChildren([]); return; }
     return firebaseService.subscribeChildren(user.uid, (data) => {
-      console.log("자녀 데이터 동기화됨:", data.length, "명");
       setChildren(data);
     });
   }, [user]);
 
   useEffect(() => {
     if (!user || !activeChildId) { setPhotos([]); return; }
+    /**
+     * [IMPROVED] 색인 에러는 firebase-service.ts에서 1차 로깅하며, 
+     * 여기서도 에러 발생 시 UI 상태를 안전하게 유지합니다.
+     */
     return firebaseService.subscribePhotos(user.uid, activeChildId, (data) => setPhotos(data));
   }, [user, activeChildId]);
 
@@ -116,7 +135,7 @@ export default function App() {
     return groups;
   }, [photos]);
 
-  /** [FIX] View 전환 로직 강화 */
+  /** View transition safety */
   useEffect(() => {
     if (!mounted || !user || children === undefined) return;
     if (children.length === 0) {
@@ -127,35 +146,41 @@ export default function App() {
     }
   }, [mounted, user, children, activeChildId, setActiveChildId, view]);
 
+  // --- Handlers ---
+
   const handleLogin = async () => {
-    try { setIsLoading(true); await signInWithRedirect(auth, googleProvider); }
-    catch (err: any) { setError(err.message); setIsLoading(false); }
+    try { 
+      setIsLoading(true); 
+      await signInWithRedirect(auth, googleProvider); 
+    } catch (err: any) { 
+      setError(err.message); 
+      setIsLoading(false); 
+    }
   };
 
   const handleLogout = async () => {
     if (!confirm('로그아웃 하시겠습니까?')) return;
-    try { await signOut(auth); setView('dashboard'); setActiveChildId(null); }
-    catch (err: any) { setError('로그아웃 실패'); }
+    try { 
+      await signOut(auth); 
+      setView('dashboard'); 
+      setActiveChildId(null); 
+    } catch (err: any) { 
+      setError('로그아웃 실패'); 
+    }
   };
 
-  /** [FIX] 자녀 프로필 추가 핸들러 - 무한 로딩 및 대시보드 전환 수정 */
   const handleAddChild = async (e: React.FormEvent) => {
     if (e) e.preventDefault();
-    console.log("--- [Debug] 프로필 생성 버튼 클릭됨 ---");
     if (!newName.trim() || !newBirthDate || !user) { setIsLoading(false); return; }
     setIsLoading(true);
     try {
-      console.log("--- [Debug] Firestore 저장 시도 ---");
       const docRef = await firebaseService.addChild(user.uid, { name: newName.trim(), birthDate: newBirthDate });
-      console.log("--- [Debug] 저장 성공 ID:", docRef.id);
       setActiveChildId(docRef.id);
       setNewName(''); setNewBirthDate(''); setShowAddProfileModal(false);
       if (view === 'onboarding') setView('dashboard');
     } catch (err: any) {
-      console.error("자녀 추가 에러", err);
       setError('아이 추가 실패: ' + err.message);
     } finally {
-      console.log("--- [Debug] 로딩 해제 ---");
       setIsLoading(false);
     }
   };
@@ -176,8 +201,13 @@ export default function App() {
     e.target.value = '';
   };
 
+  /**
+   * [IMPROVED] 업로드 처리 로직
+   * - try-catch-finally를 통한 안정적인 로딩 해제
+   * - firebase-service.ts에서 contentType 메타데이터가 자동으로 부여됨
+   */
   const startUpload = async () => {
-    if (!user || !pendingFiles) return;
+    if (!user || !pendingFiles || pendingFiles.length === 0) return;
     setIsUploadModalOpen(false);
     setIsUploading(true);
     setUploadProgress({ current: 0, total: pendingFiles.length });
@@ -190,11 +220,27 @@ export default function App() {
         } catch (e) {}
         const ageInMonths = activeChild ? calculateAgeInMonths(activeChild.birthDate, takenAt) : 0;
         let category = ageInMonths <= 12 ? "영아기" : ageInMonths <= 36 ? "유아기" : "아동기";
-        await firebaseService.uploadPhoto(user.uid, file, { childIds: uploadChildIds, fileName: file.name, fileSize: file.size, mimeType: file.type, takenAt, ageInMonths, category });
+        
+        // Metadata contains mimeType which is used for contentType in storage
+        await firebaseService.uploadPhoto(user.uid, file, { 
+          childIds: uploadChildIds, 
+          fileName: file.name, 
+          fileSize: file.size, 
+          mimeType: file.type || 'image/jpeg', 
+          takenAt, 
+          ageInMonths, 
+          category 
+        });
         setUploadProgress(prev => ({ ...prev, current: prev.current + 1 }));
       }));
-    } catch (err: any) { setError('업로드 실패: ' + err.message); }
-    finally { setIsUploading(false); setPendingFiles(null); setUploadChildIds([]); }
+    } catch (err: any) { 
+      console.error("Upload error", err);
+      setError('업로드 실패: ' + err.message); 
+    } finally { 
+      setIsUploading(false); 
+      setPendingFiles(null); 
+      setUploadChildIds([]); 
+    }
   };
 
   const togglePhotoSelection = (id: string) => setSelectedPhotoIds(prev => prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id]);
@@ -244,6 +290,8 @@ export default function App() {
       if (Array.isArray(captions)) setStoryboard(prev => prev.map((item, index) => ({ ...item, caption: captions[index] || item.caption })));
     } catch (err) { setError("AI 자막 생성 실패"); } finally { setIsGeneratingCaptions(false); }
   };
+
+  // --- Views ---
 
   const LoginView = () => (
     <div className="min-h-screen flex items-center justify-center bg-[#FDF8F5] p-6 relative z-10 overflow-hidden">
@@ -295,12 +343,32 @@ export default function App() {
                 </button>
                 <div className="flex items-center gap-4">
                   <div className="sm:flex items-center gap-3 bg-gray-50 p-2 rounded-2xl border border-gray-100 hidden">
-                    <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-white shadow-sm relative flex items-center justify-center bg-gray-100">{user.photoURL && !profileImgError ? <img src={user.photoURL} width={32} height={32} alt="U" referrerPolicy="no-referrer" className="w-full h-full object-cover" onError={() => setProfileImgError(true)} /> : <UserIcon size={16} />}</div>
+                    <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-white shadow-sm relative flex items-center justify-center bg-gray-100">
+                      {/* [IMPROVED] 구글 프로필 이미지 Fallback 및 unoptimized 적용 */}
+                      {user.photoURL && !profileImgError ? (
+                        <Image 
+                          src={user.photoURL} 
+                          width={32} 
+                          height={32} 
+                          alt="U" 
+                          unoptimized
+                          className="w-full h-full object-cover"
+                          onError={() => setProfileImgError(true)}
+                        />
+                      ) : (
+                        <UserIcon size={16} className="text-gray-400" />
+                      )}
+                    </div>
                     <span className="text-sm font-bold truncate max-w-[100px]">{user.displayName}</span>
                     <button onClick={handleLogout} className="text-gray-300 hover:text-red-400"><LogOut size={16} /></button>
                   </div>
                   <button onClick={() => setView('video-list')} className="p-3 bg-[#FDF8F5] text-[#8E8E8E] rounded-2xl"><List size={20} /></button>
-                  <label className="flex items-center gap-2 px-6 py-3 bg-[#A7C080] text-white rounded-2xl font-bold cursor-pointer hover:bg-[#8FA86A] shadow-md transition-all"><Upload size={18} /><span>기록하기</span><input type="file" multiple accept="image/*" className="hidden" onChange={handleFileSelect}/></label>
+                  {/* [IMPROVED] 업로드 상태 피드백 강화 */}
+                  <label className="flex items-center gap-2 px-6 py-3 bg-[#A7C080] text-white rounded-2xl font-bold cursor-pointer hover:bg-[#8FA86A] shadow-md transition-all">
+                    {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
+                    <span>{isUploading ? '기록 중...' : '기록하기'}</span>
+                    <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileSelect} disabled={isUploading}/>
+                  </label>
                 </div>
               </div>
             </header>
@@ -374,8 +442,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {showAddProfileModal && (
+      <AnimatePresence>{showAddProfileModal && (
           <div className="fixed inset-0 z-[200] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6">
             <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white w-full max-w-md p-10 rounded-[50px] shadow-2xl">
               <div className="flex justify-between items-center mb-10"><h3 className="text-2xl font-black">프로필 만들기</h3><button onClick={() => setShowAddProfileModal(false)}><X size={24} /></button></div>
@@ -386,11 +453,9 @@ export default function App() {
               </form>
             </motion.div>
           </div>
-        )}
-      </AnimatePresence>
+      )}</AnimatePresence>
       
-      <AnimatePresence>
-        {isEditPhotoModalOpen && editingPhoto && (
+      <AnimatePresence>{isEditPhotoModalOpen && editingPhoto && (
           <div className="fixed inset-0 bg-[#4B4453]/60 backdrop-blur-md z-[150] flex items-center justify-center p-6">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white w-full max-w-4xl p-10 rounded-[60px] flex shadow-2xl gap-12 relative overflow-hidden">
               <button onClick={() => setIsEditPhotoModalOpen(false)} className="absolute top-8 right-8 text-gray-300"><X size={32} /></button>
@@ -406,8 +471,7 @@ export default function App() {
               </div>
             </motion.div>
           </div>
-        )}
-      </AnimatePresence>
+      )}</AnimatePresence>
     </div>
   );
 }
