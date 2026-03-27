@@ -182,6 +182,7 @@ export default function App() {
   };
 
   const handleAddChild = async (e: React.FormEvent) => {
+    console.log('--- [Debug] 프로필 추가 버튼이 마침내 눌림! ---');
     if (e) e.preventDefault();
     if (!newName.trim() || !newBirthDate || !user) { setIsLoading(false); return; }
     setIsLoading(true);
@@ -411,16 +412,16 @@ export default function App() {
                  <h2 className="text-2xl font-black tracking-tight">{user.displayName}님, 반가워요!</h2>
                  <p className="text-gray-400 font-medium">아이의 상자를 처음 열기 위해 이름과 생일을 적어보세요.</p>
                </div>
-               <form onSubmit={handleAddChild} className="space-y-6 text-left">
+               <form onSubmit={(e) => { console.log("handleAddChild called"); handleAddChild(e); }} className="space-y-6 text-left">
                  <div className="space-y-2">
                    <label className="text-[10px] text-gray-300 font-black ml-4 uppercase tracking-[0.2em]">아이 이름</label>
-                   <input required type="text" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-6 bg-[#FDF8F5] rounded-[28px] outline-none font-bold border-2 border-transparent focus:border-[#A7C080]/20" placeholder="이름" />
+                   <input required type="text" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-6 bg-[#FDF8F5] rounded-[28px] outline-none font-bold border-2 border-transparent focus:border-[#A7C080]/20 relative z-[9999] pointer-events-auto" placeholder="이름" />
                  </div>
                  <div className="space-y-2 text-left">
                    <label className="text-[10px] text-gray-300 font-black ml-4 uppercase tracking-[0.2em]">생년월일</label>
-                   <input required type="date" value={newBirthDate} onChange={e => setNewBirthDate(e.target.value)} className="w-full p-6 bg-[#FDF8F5] rounded-[28px] outline-none font-bold border-2 border-transparent focus:border-[#A7C080]/20" />
+                   <input required type="date" value={newBirthDate} onChange={e => setNewBirthDate(e.target.value)} className="w-full p-6 bg-[#FDF8F5] rounded-[28px] outline-none font-bold border-2 border-transparent focus:border-[#A7C080]/20 relative z-[9999] pointer-events-auto" />
                  </div>
-                 <button type="submit" disabled={isLoading} className="w-full bg-[#A7C080] text-white py-6 rounded-[32px] font-black shadow-lg flex items-center justify-center gap-3 disabled:opacity-70 text-lg">{isLoading ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}<span>상자 열기</span></button>
+                 <button type="submit" disabled={isLoading} className="w-full bg-[#A7C080] text-white py-6 rounded-[32px] font-black shadow-lg flex items-center justify-center gap-3 disabled:opacity-70 text-lg relative z-[9999] pointer-events-auto">{isLoading ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}<span>상자 열기</span></button>
                </form>
             </div>
           </motion.div>
@@ -690,9 +691,9 @@ export default function App() {
             <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white w-full max-w-md p-10 rounded-[50px] shadow-2xl">
               <div className="flex justify-between items-center mb-10"><h3 className="text-2xl font-black">프로필 만들기</h3><button onClick={() => setShowAddProfileModal(false)}><X size={24} /></button></div>
               <form onSubmit={handleAddChild} className="space-y-6">
-                <div><label className="text-[10px] text-gray-400 font-bold ml-2">Name</label><input type="text" required value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-5 bg-gray-50 rounded-[24px] outline-none font-bold" /></div>
-                <div><label className="text-[10px] text-gray-400 font-bold ml-2">Birthday</label><input type="date" required value={newBirthDate} onChange={e => setNewBirthDate(e.target.value)} className="w-full p-5 bg-gray-50 rounded-[24px] outline-none font-bold" /></div>
-                <div className="flex gap-4 pt-4"><button type="button" onClick={() => setShowAddProfileModal(false)} className="flex-1 py-5 text-gray-400 font-bold">취소</button><button type="submit" className="flex-1 py-5 bg-[#A7C080] text-white rounded-[24px] font-black shadow-lg">생성</button></div>
+                <div><label className="text-[10px] text-gray-400 font-bold ml-2">Name</label><input type="text" required value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-5 bg-gray-50 rounded-[24px] outline-none font-bold relative z-[9999] pointer-events-auto" /></div>
+                <div><label className="text-[10px] text-gray-400 font-bold ml-2">Birthday</label><input type="date" required value={newBirthDate} onChange={e => setNewBirthDate(e.target.value)} className="w-full p-5 bg-gray-50 rounded-[24px] outline-none font-bold relative z-[9999] pointer-events-auto" /></div>
+                <div className="flex gap-4 pt-4"><button type="button" onClick={() => setShowAddProfileModal(false)} className="flex-1 py-5 text-gray-400 font-bold">취소</button><button type="submit" className="flex-1 py-5 bg-[#A7C080] text-white rounded-[24px] font-black shadow-lg relative z-[9999] pointer-events-auto">생성</button></div>
               </form>
             </motion.div>
           </div>
