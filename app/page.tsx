@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { 
-  Baby, Plus, Trash2, X, Camera, Loader2, AlertCircle, Check, Video, Upload, Calendar, Clock, Image as ImageIcon, Save, Play, Edit3, List, ArrowLeft, Sparkles, Layout, LogOut, User as UserIcon, MessageSquare
+  Baby, Plus, Trash2, X, Camera, Loader2, AlertCircle, Check, Video, Upload, Calendar, Clock, Image as ImageIcon, Save, Play, Edit3, List, ArrowLeft, Sparkles, Layout, LogOut, User as UserIcon, MessageSquare, Share2, ChevronLeft, ChevronRight, Copy
 } from 'lucide-react';
 import exifr from 'exifr';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -88,6 +88,13 @@ export default function App() {
   const [projectTitle, setProjectTitle] = useState('');
   const [storyboard, setStoryboard] = useState<{ photoId: string; caption: string; duration: number }[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState('classic');
+
+  // --- Slideshow State ---
+  const [isSlideShowOpen, setIsSlideShowOpen] = useState(false);
+  const [slideShowIndex, setSlideShowIndex] = useState(0);
+  const [slideShowPhotos, setSlideShowPhotos] = useState<Photo[]>([]);
+  const [isSlideShowPlaying, setIsSlideShowPlaying] = useState(true);
+  const [copiedToClipboard, setCopiedToClipboard] = useState(false);
 
   // --- Firebase Auth Listener ---
   useEffect(() => {
@@ -260,7 +267,51 @@ export default function App() {
 
   const togglePhotoSelection = (id: string) => setSelectedPhotoIds(prev => prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id]);
   const handleEditPhoto = (p: Photo) => { setEditingPhoto(p); setEditCaption(p.caption || ''); setEditCategory(p.category || ''); setEditTakenAt(new Date(p.takenAt).toISOString().split('T')[0]); setIsEditPhotoModalOpen(true); };
-  const startNewVideoProject = () => { if (selectedPhotoIds.length === 0) return; setProjectTitle(`${activeChild?.name}의 보물 영상 (${new Date().toLocaleDateString()})`); setStoryboard(selectedPhotoIds.map(id => ({ photoId: id, caption: '', duration: 3 }))); setEditingProjectId(null); setView('video-editor'); };
+
+  // --- 슬라이드쇼 자동 재생 ---
+  useEffect(() => {
+    if (!isSlideShowOpen || !isSlideShowPlaying || slideShowPhotos.length === 0) return;
+    const timer = setInterval(() => {
+      setSlideShowIndex(prev => (prev + 1) % slideShowPhotos.length);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [isSlideShowOpen, isSlideShowPlaying, slideShowPhotos.length]);
+
+  const startNewVideoProject = async () => {
+    if (selectedPhotoIds.length === 0) return;
+    const selected = (photos || []).filter(p => selectedPhotoIds.includes(p.id!));
+    setSlideShowPhotos(selected);
+    setSlideShowIndex(0);
+    setIsSlideShowPlaying(true);
+    setIsSlideShowOpen(true);
+    // Firestore에 videoProject 저장
+    if (user && activeChildId) {
+      try {
+        const title = `${activeChild?.name}의 슬라이드쇼 (${new Date().toLocaleDateString()})`;
+        await firebaseService.saveVideoProject(user.uid, {
+          childId: activeChildId,
+          title,
+          scenes: selectedPhotoIds.map(id => ({ photoId: id, caption: '', duration: 3 })),
+          templateId: 'slideshow',
+          status: 'draft'
+        });
+      } catch (e) { console.error('슬라이드쇼 저장 실패', e); }
+    }
+  };
+
+  // --- Web Share API 공유 ---
+  const handleShare = async (photo: Photo) => {
+    const shareText = `우리아이 성장일기 찰칵! 📸\n${activeChild?.name}의 소중한 순간`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: '성장 기록함', text: shareText, url: window.location.href });
+      } catch (e) { console.log('공유 취소'); }
+    } else {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopiedToClipboard(true);
+      setTimeout(() => setCopiedToClipboard(false), 2500);
+    }
+  };
   const handleDeletePhoto = async (id: string) => { if (!user || !confirm('삭제하시겠습니까?')) return; try { await firebaseService.deletePhoto(user.uid, id); setSelectedPhotoIds(prev => prev.filter(pid => pid !== id)); setIsEditPhotoModalOpen(false); setEditingPhoto(null); } catch (err: any) { setError('삭제 실패'); } };
 
   const handleUpdatePhoto = async (e: React.FormEvent) => {
@@ -496,6 +547,7 @@ export default function App() {
                               <div className="absolute top-4 left-4 px-4 py-2 bg-white/90 backdrop-blur-md rounded-[18px] text-[10px] font-black text-[#A7C080] shadow-sm tracking-tight">{formatAge(photo.ageInMonths)}</div>
                               <button onClick={(e) => { e.stopPropagation(); handleDeletePhoto(photo.id!); }} className="absolute top-4 right-4 p-3 bg-red-400/90 text-white rounded-[18px] opacity-0 group-hover:opacity-100 transition-all hover:bg-red-500 hover:scale-110 shadow-lg"><Trash2 size={18} /></button>
                               <button onClick={(e) => { e.stopPropagation(); handleEditPhoto(photo); }} className="absolute bottom-4 right-4 p-3 bg-[#A7C080]/90 text-white rounded-[18px] opacity-0 group-hover:opacity-100 transition-all hover:bg-[#8FA86A] hover:scale-110 shadow-lg"><Edit3 size={18} /></button>
+                              <button onClick={(e) => { e.stopPropagation(); handleShare(photo); }} className="absolute bottom-4 left-4 p-3 bg-blue-400/90 text-white rounded-[18px] opacity-0 group-hover:opacity-100 transition-all hover:bg-blue-500 hover:scale-110 shadow-lg"><Share2 size={18} /></button>
                             </div>
                             
                             <div className="px-4 pb-4 text-center">
@@ -525,8 +577,17 @@ export default function App() {
                   </div>
                   <div className="flex gap-3">
                     <button onClick={() => setSelectedPhotoIds([])} className="p-4 text-gray-400 hover:text-white transition-colors"><X size={24} /></button>
-                    <button onClick={startNewVideoProject} className="bg-[#A7C080] px-8 py-4 rounded-[28px] font-black flex items-center gap-3 transition-all hover:bg-[#8FA86A] hover:scale-105 active:scale-95"><Video size={22} fill="currentColor" /> 영상 제작</button>
+                    <button onClick={startNewVideoProject} className="bg-[#A7C080] px-8 py-4 rounded-[28px] font-black flex items-center gap-3 transition-all hover:bg-[#8FA86A] hover:scale-105 active:scale-95"><Video size={22} fill="currentColor" /> 슬라이드쇼</button>
                   </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* 클립보드 복사 토스트 */}
+            <AnimatePresence>
+              {copiedToClipboard && (
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-32 left-1/2 -translate-x-1/2 z-[200] bg-[#4B4453] text-white px-6 py-3 rounded-[20px] shadow-xl flex items-center gap-3 text-sm font-bold">
+                  <Copy size={16} /> 클립보드에 링크가 복사되었습니다!
                 </motion.div>
               )}
             </AnimatePresence>
@@ -717,6 +778,96 @@ export default function App() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* 슬라이드쇼 모달 */}
+      <AnimatePresence>
+        {isSlideShowOpen && slideShowPhotos.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[500] bg-black/95 flex flex-col items-center justify-center"
+          >
+            {/* 닫기 버튼 */}
+            <button
+              onClick={() => { setIsSlideShowOpen(false); setSelectedPhotoIds([]); }}
+              className="absolute top-8 right-8 p-4 bg-white/10 hover:bg-white/20 text-white rounded-full transition-all z-10"
+            >
+              <X size={28} />
+            </button>
+
+            {/* 진행 바 */}
+            <div className="absolute top-0 left-0 right-0 flex gap-1 p-4 z-10">
+              {slideShowPhotos.map((_, i) => (
+                <div key={i} className="flex-1 h-1 rounded-full overflow-hidden bg-white/20">
+                  <motion.div
+                    className="h-full bg-white rounded-full"
+                    initial={{ width: '0%' }}
+                    animate={{ width: i < slideShowIndex ? '100%' : i === slideShowIndex ? '100%' : '0%' }}
+                    transition={i === slideShowIndex ? { duration: 3, ease: 'linear' } : { duration: 0 }}
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* 이미지 */}
+            <div className="relative w-full max-w-2xl aspect-[4/3] mx-auto px-6">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={slideShowIndex}
+                  initial={{ opacity: 0, scale: 1.04 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.96 }}
+                  transition={{ duration: 0.6, ease: 'easeInOut' }}
+                  className="absolute inset-0 rounded-[40px] overflow-hidden shadow-[0_40px_80px_-20px_rgba(0,0,0,0.8)]"
+                >
+                  <BlobImage blob={slideShowPhotos[slideShowIndex].imageUrl} fill className="object-cover" alt="Slide" />
+                </motion.div>
+              </AnimatePresence>
+            </div>
+
+            {/* 캡션 */}
+            <div className="mt-8 text-center space-y-2 px-8">
+              {slideShowPhotos[slideShowIndex].caption && (
+                <p className="text-white text-xl font-bold italic opacity-90">
+                  &ldquo;{slideShowPhotos[slideShowIndex].caption}&rdquo;
+                </p>
+              )}
+              <p className="text-white/40 text-sm font-black uppercase tracking-widest">
+                {formatAge(slideShowPhotos[slideShowIndex].ageInMonths)} &nbsp;·&nbsp;
+                {new Date(slideShowPhotos[slideShowIndex].takenAt).toLocaleDateString()}
+              </p>
+            </div>
+
+            {/* 컨트롤 버튼 */}
+            <div className="flex items-center gap-6 mt-8">
+              <button
+                onClick={() => setSlideShowIndex(prev => (prev - 1 + slideShowPhotos.length) % slideShowPhotos.length)}
+                className="p-5 bg-white/10 hover:bg-white/20 text-white rounded-full transition-all"
+              >
+                <ChevronLeft size={28} />
+              </button>
+              <button
+                onClick={() => setIsSlideShowPlaying(p => !p)}
+                className="px-10 py-5 bg-white/10 hover:bg-white/20 text-white rounded-[28px] font-black text-lg transition-all"
+              >
+                {isSlideShowPlaying ? '⏸ 정지' : '▶ 재생'}
+              </button>
+              <button
+                onClick={() => setSlideShowIndex(prev => (prev + 1) % slideShowPhotos.length)}
+                className="p-5 bg-white/10 hover:bg-white/20 text-white rounded-full transition-all"
+              >
+                <ChevronRight size={28} />
+              </button>
+            </div>
+
+            {/* 카운터 */}
+            <p className="mt-4 text-white/30 text-xs font-black uppercase tracking-widest">
+              {slideShowIndex + 1} / {slideShowPhotos.length}
+            </p>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
