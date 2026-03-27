@@ -389,6 +389,15 @@ export default function App() {
                             <BlobImage blob={photo.imageUrl} fill className="object-cover" alt="Art" />
                             {selectedPhotoIds.includes(photo.id!) && <div className="absolute inset-0 bg-[#A7C080]/30 backdrop-blur-[1px] flex items-center justify-center"><div className="bg-white p-2 rounded-full text-[#A7C080] shadow-xl"><Check size={24} strokeWidth={4} /></div></div>}
                             <div className="absolute top-2 left-2 px-3 py-1 bg-white/80 backdrop-blur-md rounded-xl text-[10px] font-black text-[#A7C080] shadow-sm">{formatAge(photo.ageInMonths)}</div>
+                            
+                            {/* [NEW] 갤러리 카드 삭제 버튼 (홉버 시 노출) */}
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); handleDeletePhoto(photo.id!); }} 
+                              className="absolute top-2 right-2 p-2 bg-red-500/80 text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all shadow-lg hover:bg-red-600"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+
                             <button onClick={(e) => { e.stopPropagation(); handleEditPhoto(photo); }} className="absolute bottom-2 right-2 p-2 bg-black/20 text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all"><Edit3 size={14} /></button>
                           </motion.div>
                         ))}
