@@ -675,7 +675,7 @@ export default function App() {
                      <span className="font-black text-2xl text-[#4B4453]">{child.name}</span>
                    </button>
                 ))}
-                <button onClick={() => { setView('onboarding'); }} className="flex flex-col items-center justify-center gap-8 p-12 rounded-[60px] border-4 border-dashed border-[#F3EDEA] text-gray-300 hover:border-[#A7C080]/30 hover:text-[#A7C080] transition-all bg-[#FDF8F5]/50 group">
+                <button onClick={() => { console.log('--- [Debug] 새 상자 버튼 클릭됨! 모달 열기 시도 ---'); setView('dashboard'); setShowAddProfileModal(true); }} className="flex flex-col items-center justify-center gap-8 p-12 rounded-[60px] border-4 border-dashed border-[#F3EDEA] text-gray-300 hover:border-[#A7C080]/30 hover:text-[#A7C080] transition-all bg-[#FDF8F5]/50 group relative z-50 cursor-pointer pointer-events-auto">
                   <div className="w-32 h-32 rounded-[40px] flex items-center justify-center bg-white shadow-inner group-hover:scale-110 transition-transform duration-300"><Plus size={48} /></div>
                   <span className="font-black text-2xl uppercase tracking-widest">새 상자</span>
                 </button>
