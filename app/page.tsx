@@ -77,8 +77,6 @@ export default function App() {
 
   // --- UI & Lifecycle State ---
   const [mounted, setMounted] = useState(false);
-  
-  // [강제 고정] isLoading은 기본적으로 false로 시작하며, 로그인 버튼의 disabled 여부에 영향을 주지 않도록 강제 해제합니다.
   const [isLoading, setIsLoading] = useState(false);
   const [view, setView] = useState<'onboarding' | 'dashboard' | 'profiles' | 'video-editor' | 'video-list'>('dashboard');
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +125,7 @@ export default function App() {
       } catch (err: any) {
         console.error("--- [Error] 리다이렉트 처리 에러 ---", err);
         if (err.code === 'auth/cross-origin-opener-policy-blocked') {
-          console.warn("--- [Debug] COOP 차단 감치 (상태 리스너가 이를 대체합니다) ---");
+          console.warn("--- [Debug] COOP 차단 감치 ---");
         } else {
           setError("로그인 처리 중 오류가 발생했습니다: " + err.message);
         }
@@ -158,6 +156,7 @@ export default function App() {
       return;
     }
     const unsubscribe = firebaseService.subscribeChildren(user.uid, (data) => {
+      console.log("--- [Debug] 자녀 데이터 동기화됨:", data.length, "명");
       setChildren(data);
     });
     return () => unsubscribe();
@@ -219,20 +218,14 @@ export default function App() {
   // --- Handlers ---
 
   const handleLogin = async () => {
-    console.log("--- [Debug] handleLogin 함수 진입 성공 ---");
-    // [보안] 디버깅을 위해 alert를 띄웁니다.
-    alert('로그인 시퀀스가 시작됩니다. 브라우저가 이동합니다.');
-    
+    console.log("--- [Debug] handleLogin 함수 진입 ---");
     try {
       setIsLoading(true);
-      console.log("--- [Debug] signInWithRedirect 실행 시도 ---");
       await signInWithRedirect(auth, googleProvider);
     } catch (err: any) {
-      console.error("--- [Error] 로그인 핸들러 내 에러 발생 ---", err);
+      console.error("--- [Error] 로그인 에러 ---", err);
       setError('로그인 시도 중 오류가 발생했습니다: ' + err.message);
-    } finally {
       setIsLoading(false);
-      console.log("--- [Debug] handleLogin 함수 종료 ---");
     }
   };
 
@@ -248,25 +241,45 @@ export default function App() {
     }
   };
 
+  /**
+   * [FIX] 자녀 프로필 추가 핸들러 개선
+   * - 디버깅 로그 추가
+   * - e.preventDefault() 보장
+   * - Firestore 저장 로직 강화
+   */
   const handleAddChild = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName || !newBirthDate || !user) return;
+    if (e) e.preventDefault();
+    console.log("--- [Debug] 프로필 생성 버튼 클릭됨 (handleAddChild 실행) ---");
+    
+    if (!newName.trim() || !newBirthDate || !user) {
+      console.warn("--- [Debug] 프로필 데이터 부족:", { newName, newBirthDate, user: !!user });
+      return;
+    }
 
     try {
       setIsLoading(true);
+      console.log("--- [Debug] Firestore에 자녀 프로필 저장 시도:", newName);
+      
       const docRef = await firebaseService.addChild(user.uid, {
-        name: newName,
+        name: newName.trim(),
         birthDate: newBirthDate,
       });
 
+      console.log("--- [Debug] 프로필 저장 성공! ID:", docRef.id);
+      
       setActiveChildId(docRef.id);
       setNewName('');
       setNewBirthDate('');
       setShowAddProfileModal(false);
-      if (view === 'onboarding') setView('dashboard');
+      
+      // 온보딩 뷰인 경우 대시보드로 즉시 이동
+      if (view === 'onboarding') {
+        console.log("--- [Debug] 온보딩 완료. 대시보드로 이동합니다.");
+        setView('dashboard');
+      }
     } catch (err: any) {
       console.error("--- [Error] 자녀 프로필 추가 에러 ---", err);
-      setError('아이 추가 실패: ' + err.message);
+      setError('아이 추가 중 문제가 발생했습니다: ' + err.message);
     } finally {
       setIsLoading(false);
     }
@@ -511,32 +524,6 @@ export default function App() {
 
   const LoginView = () => (
     <div className="min-h-screen flex items-center justify-center bg-[#FDF8F5] p-6 relative z-10 overflow-hidden">
-      {/* [강제 디버깅 버튼] 레이어 문제 확인용 */}
-      <button 
-        type="button"
-        onClick={() => {
-          console.log("--- [Debug] 테스트 상자 열기(Red Button) 클릭됨 ---");
-          alert('--- [Debug] 테스트 상자 열기 클릭됨 (JS 동작 중) ---');
-          handleLogin();
-        }}
-        style={{ 
-          position: 'fixed', 
-          top: '20px', 
-          left: '20px', 
-          zIndex: 99999, 
-          padding: '24px', 
-          background: 'red', 
-          color: 'white', 
-          fontWeight: 'bold', 
-          borderRadius: '16px',
-          boxShadow: '0 10px 30px rgba(0,0,0,0.3)',
-          border: '4px solid white',
-          cursor: 'pointer'
-        }}
-      >
-        테스트 상자 열기 (클릭 확인용)
-      </button>
-
       <motion.div 
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -554,7 +541,6 @@ export default function App() {
         </div>
         
         <div className="relative z-30">
-          {/* [DEBUG] 로딩 중이더라도 버튼이 아예 사라지지 않게 처리하여 하이드레이션 오류를 방지합니다. */}
           <div className="space-y-4">
             {isLoading && (
               <div className="flex justify-center flex-col items-center gap-4 py-4 animate-pulse">
@@ -566,7 +552,6 @@ export default function App() {
             <button 
               type="button"
               onClick={handleLogin}
-              // [FIX] Disabled를 강제로 false로 고정하여 상태 수렁에서 벗어납니다.
               disabled={false}
               className="w-full relative z-[100] pointer-events-auto flex items-center justify-center gap-4 bg-white border-2 border-[#E5E5E5] hover:border-[#A7C080] py-5 rounded-3xl font-black text-[#4B4453] transition-all group active:scale-95 shadow-sm hover:shadow-xl"
             >
@@ -577,16 +562,6 @@ export default function App() {
               />
               <span className="pointer-events-none text-xl">상자 열기</span>
             </button>
-            
-            {isLoading && (
-              <button 
-                onClick={() => setIsLoading(false)} 
-                className="w-full text-[11px] text-gray-300 underline font-bold hover:text-red-400 transition-colors"
-                type="button"
-              >
-                로딩이 너무 길다면 클릭하여 중단
-              </button>
-            )}
           </div>
         </div>
         
@@ -663,7 +638,7 @@ export default function App() {
               <div className="space-y-3 mb-8">
                 {children?.map(child => (
                   <label key={child.id} className={`flex items-center gap-4 p-4 rounded-2xl border-2 cursor-pointer transition-all ${uploadChildIds.includes(child.id!) ? 'border-[#A7C080] bg-[#A7C080]/5' : 'border-[#FDF8F5] bg-[#FDF8F5]'}`}>
-                    <input type="checkbox" className="hidden" checked={uploadChildIds.includes(child.id!)} onChange={() => setUploadChildIds(prev => prev.includes(child.id!) ? prev.filter(id => id !== child.id) : [...prev, child.id!])} />
+                    <input type="checkbox" className="hidden" checked={uploadChildIds.includes(child.id!)} onChange={() => setUploadChildIds(prev => prev.includes(child.id!) ? prev.filter(id => id !== child.id) : [...prev, id!])} />
                     <div className="w-10 h-10 bg-[#A7C080] rounded-xl flex items-center justify-center text-white font-bold">{child.name[0]}</div>
                     <span className="font-bold flex-1">{child.name}</span>
                     {uploadChildIds.includes(child.id!) && <Check size={20} className="text-[#A7C080]" />}
@@ -678,14 +653,59 @@ export default function App() {
 
       <AnimatePresence mode="wait">
         {view === 'onboarding' && (
-          <motion.div key="onboarding" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex items-center justify-center p-6">
-            <div className="max-w-md w-full bg-white p-12 rounded-[50px] shadow-2xl text-center space-y-8">
-               <div className="w-20 h-20 bg-[#A7C080]/10 rounded-full flex items-center justify-center text-[#A7C080] mx-auto"><Baby size={40} fill="currentColor" /></div>
-               <div><h2 className="text-2xl font-bold">환영합니다, {user.displayName}님!</h2><p className="text-gray-400 mt-2">아이의 첫 번째 프로필을 만들어 보물 상자를 열어보세요.</p></div>
-               <form onSubmit={handleAddChild} className="space-y-4">
-                 <input required type="text" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-4 bg-gray-50 rounded-2xl outline-none" placeholder="아이의 이름" />
-                 <input required type="date" value={newBirthDate} onChange={e => setNewBirthDate(e.target.value)} className="w-full p-4 bg-gray-50 rounded-2xl outline-none" />
-                 <button type="submit" className="w-full bg-[#A7C080] text-white py-5 rounded-[24px] font-bold shadow-lg">상자 열기</button>
+          <motion.div key="onboarding" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex items-center justify-center p-6 relative z-10">
+            <div className="max-w-md w-full bg-white p-12 rounded-[50px] shadow-2xl text-center space-y-8 relative z-20 pointer-events-auto">
+               <div className="w-20 h-20 bg-[#A7C080]/10 rounded-full flex items-center justify-center text-[#A7C080] mx-auto pointer-events-none">
+                 <Baby size={40} fill="currentColor" />
+               </div>
+               <div className="pointer-events-none">
+                 <h2 className="text-2xl font-black">{user.displayName}님, 환영합니다!</h2>
+                 <p className="text-gray-400 mt-2 font-bold">아이의 첫 번째 프로필을 만들어 보물 상자를 열어보세요.</p>
+               </div>
+               
+               <form 
+                 onSubmit={handleAddChild} 
+                 className="space-y-6 relative z-30 pointer-events-auto"
+               >
+                 <div className="space-y-2 text-left">
+                   <label className="text-[10px] text-gray-400 font-black ml-2 uppercase tracking-widest">아이 이름</label>
+                   <input 
+                     required 
+                     type="text" 
+                     value={newName} 
+                     onChange={e => setNewName(e.target.value)} 
+                     className="w-full p-5 bg-gray-50 rounded-2xl outline-none font-bold border-2 border-transparent focus:border-[#A7C080]/20 transition-all" 
+                     placeholder="예: 우리집 귀요미" 
+                   />
+                 </div>
+                 <div className="space-y-2 text-left">
+                   <label className="text-[10px] text-gray-400 font-black ml-2 uppercase tracking-widest">생년월일</label>
+                   <input 
+                     required 
+                     type="date" 
+                     value={newBirthDate} 
+                     onChange={e => setNewBirthDate(e.target.value)} 
+                     className="w-full p-5 bg-gray-50 rounded-2xl outline-none font-bold border-2 border-transparent focus:border-[#A7C080]/20 transition-all" 
+                   />
+                 </div>
+                 
+                 <div className="pt-4">
+                   <button 
+                     type="submit" 
+                     disabled={isLoading}
+                     /**
+                      * [FIX] z-index와 pointer-events를 부여하여 클릭 가로챔을 방지합니다.
+                      */
+                     className="w-full relative z-[50] pointer-events-auto bg-[#A7C080] text-white py-5 rounded-[28px] font-black shadow-lg hover:shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-70"
+                   >
+                     {isLoading ? (
+                       <Loader2 className="animate-spin" size={20} />
+                     ) : (
+                       <Sparkles size={20} />
+                     )}
+                     <span>상자 열기</span>
+                   </button>
+                 </div>
                </form>
             </div>
           </motion.div>
