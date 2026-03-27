@@ -8,34 +8,52 @@ import {
 } from 'lucide-react';
 import exifr from 'exifr';
 import { GoogleGenAI, Type } from "@google/genai";
-import { onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
+import { onAuthStateChanged, signInWithRedirect, getRedirectResult, signOut, type User } from 'firebase/auth';
 import { auth, googleProvider } from '@/lib/firebase';
 import { firebaseService, type Child, type Photo, type VideoProject } from '@/lib/firebase-service';
 import { useChildStore } from '@/lib/store';
 import { calculateAgeInMonths, formatAge } from '@/lib/utils';
 
 /**
- * BlobImage Component: Manages Blob URLs to prevent memory leaks.
+ * BlobImage Component: Manages Blob URLs and handles loading errors with a fallback.
  */
-const BlobImage = ({ blob, ...props }: any) => {
+const BlobImage = ({ blob, alt, ...props }: any) => {
   const [url, setUrl] = useState<string | null>(null);
+  const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
     if (!blob) {
       setUrl(null);
+      setHasError(false);
       return;
     }
     if (typeof blob === 'string') {
       setUrl(blob);
+      setHasError(false);
       return;
     }
     const newUrl = URL.createObjectURL(blob);
     setUrl(newUrl);
+    setHasError(false);
     return () => URL.revokeObjectURL(newUrl);
   }, [blob]);
 
-  if (!url) return null;
-  return <Image src={url} {...props} />;
+  if (hasError || !url) {
+    return (
+      <div className="w-full h-full bg-gray-100 flex items-center justify-center text-gray-300">
+        <ImageIcon size={24} />
+      </div>
+    );
+  }
+
+  return (
+    <Image 
+      src={url} 
+      alt={alt || "이미지"}
+      onError={() => setHasError(true)}
+      {...props} 
+    />
+  );
 };
 
 /**
@@ -85,18 +103,40 @@ export default function App() {
   const [storyboard, setStoryboard] = useState<{ photoId: string; caption: string; duration: number }[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState('classic');
 
-  // --- Firebase Auth Listener ---
+  // --- Firebase Auth & Redirect Result Listener ---
   useEffect(() => {
     if (!auth) {
       setAuthLoading(false);
       return;
     }
+
+    // 1. Handle Redirect Result (COOP Error Fix)
+    const checkRedirectResult = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result?.user) {
+          console.log("로그인 성공 (리다이렉트):", result.user.displayName);
+        }
+      } catch (err: any) {
+        if (err.code === 'auth/cross-origin-opener-policy-blocked') {
+          console.warn("COOP blocked redirect, but continuing with state listener.");
+        } else {
+          console.error("Redirect Auth Error:", err);
+          setError("로그인 처리 중 오류가 발생했습니다.");
+        }
+      }
+    };
+
+    checkRedirectResult();
+
+    // 2. Auth State Listener
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setAuthLoading(false);
       setMounted(true);
       setIsLoading(false);
     });
+
     return () => unsubscribe();
   }, []);
 
@@ -167,15 +207,15 @@ export default function App() {
     }
   }, [mounted, user, children, activeChildId, setActiveChildId]);
 
-  // --- Authentication Handlers ---
+  // --- Authentication Handlers (COOP Fix: Using Redirect) ---
 
   const handleLogin = async () => {
     try {
       setIsLoading(true);
-      await signInWithPopup(auth, googleProvider);
+      // signInWithPopup 대신 signInWithRedirect 사용
+      await signInWithRedirect(auth, googleProvider);
     } catch (err: any) {
-      setError('로그인 중 오류가 발생했습니다: ' + err.message);
-    } finally {
+      setError('로그인 시도 중 오류가 발생했습니다: ' + err.message);
       setIsLoading(false);
     }
   };
@@ -296,7 +336,7 @@ export default function App() {
     }
   };
 
-  // --- Photo Interaction Handlers (Fixed/Added for Vercel) ---
+  // --- Photo Interaction Handlers ---
 
   const togglePhotoSelection = (id: string) => {
     setSelectedPhotoIds(prev =>
@@ -475,7 +515,10 @@ export default function App() {
           </p>
         </div>
         {isLoading ? (
-          <div className="flex justify-center"><Loader2 className="animate-spin text-[#A7C080]" size={32} /></div>
+          <div className="flex justify-center flex-col items-center gap-4">
+            <Loader2 className="animate-spin text-[#A7C080]" size={32} />
+            <p className="text-xs text-gray-400 font-bold">인증 처리 중...</p>
+          </div>
         ) : (
           <button 
             onClick={handleLogin}
@@ -597,13 +640,23 @@ export default function App() {
               <div className="max-w-7xl mx-auto flex justify-between items-center">
                 <button onClick={() => setView('profiles')} className="flex items-center gap-4 bg-[#FDF8F5] p-2 pr-6 rounded-2xl border border-[#A7C080]/10 hover:shadow-md transition-all">
                   <div className="w-10 h-10 bg-[#A7C080] rounded-xl flex items-center justify-center text-white overflow-hidden relative">
-                    {activeChild?.profileImageUrl ? <BlobImage blob={activeChild.profileImageUrl} fill className="object-cover" alt="X" /> : <Baby size={20} />}
+                    {activeChild?.profileImageUrl ? <BlobImage blob={activeChild.profileImageUrl} fill className="object-cover" alt="Profile" /> : <Baby size={20} />}
                   </div>
                   <div className="text-left"><h2 className="text-sm font-black">{activeChild?.name}</h2><p className="text-[10px] text-gray-400">성장 기록 중</p></div>
                 </button>
                 <div className="flex items-center gap-4">
                   <div className="sm:flex items-center gap-3 mr-4 bg-gray-50 p-2 rounded-2xl pr-4 border border-gray-100 hidden">
-                    <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-white shadow-sm"><Image src={user.photoURL || ''} width={32} height={32} alt="U" /></div>
+                    <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-white shadow-sm relative">
+                      {user.photoURL ? (
+                        <Image 
+                          src={user.photoURL} 
+                          width={32} height={32} alt="U" 
+                          onError={(e) => { (e.target as any).src = 'https://www.gstatic.com/images/branding/product/1x/avatar_circle_blue_512dp.png'; }}
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gray-200 flex items-center justify-center text-gray-400"><Users size={16} /></div>
+                      )}
+                    </div>
                     <span className="text-sm font-bold truncate max-w-[100px]">{user.displayName}</span>
                     <button onClick={handleLogout} className="text-gray-300 hover:text-red-400"><LogOut size={16} /></button>
                   </div>
