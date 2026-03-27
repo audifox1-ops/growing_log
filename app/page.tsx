@@ -296,6 +296,34 @@ export default function App() {
     }
   };
 
+  // --- Photo Interaction Handlers (Fixed/Added for Vercel) ---
+
+  const togglePhotoSelection = (id: string) => {
+    setSelectedPhotoIds(prev =>
+      prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id]
+    );
+  };
+
+  const handleEditPhoto = (photo: Photo) => {
+    setEditingPhoto(photo);
+    setEditCaption(photo.caption || '');
+    setEditCategory(photo.category || '');
+    setEditTakenAt(new Date(photo.takenAt).toISOString().split('T')[0]);
+    setIsEditPhotoModalOpen(true);
+  };
+
+  const startNewVideoProject = () => {
+    if (selectedPhotoIds.length === 0) return;
+    setProjectTitle(`${activeChild?.name}의 보물 영상 (${new Date().toLocaleDateString()})`);
+    setStoryboard(selectedPhotoIds.map(id => ({
+      photoId: id,
+      caption: '',
+      duration: 3
+    })));
+    setEditingProjectId(null);
+    setView('video-editor');
+  };
+
   const handleDeletePhoto = async (id: string) => {
     if (!user || !confirm('이 사진을 클라우드에서 영구 삭제하시겠습니까?')) return;
     const photo = photos?.find(p => p.id === id);
@@ -411,7 +439,7 @@ export default function App() {
         contents: [{ parts: [{ text: `아이 이름: ${activeChild.name}` }, ...photoParts.flat()] }]
       });
 
-      // Vercel build fix: JSON.parse(response.text || "[]")
+      // Vercel build fix: handle undefined response.text
       const captions = JSON.parse(response.text || "[]");
       if (Array.isArray(captions)) {
         setStoryboard(prev => prev.map((item, index) => ({
