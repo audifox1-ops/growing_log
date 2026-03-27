@@ -308,7 +308,12 @@ export default function App() {
    */
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files || files.length === 0) return;
+    
+    // Gracefully handle user cancellation (no files selected)
+    if (!files || files.length === 0) {
+      console.log("File selection cancelled or empty.");
+      return;
+    }
     
     if (!activeChildId) {
       setError('자녀를 먼저 선택해 주세요.');
@@ -318,7 +323,7 @@ export default function App() {
     setPendingFiles(files);
     setUploadChildIds([activeChildId]); // Default to currently active child
     setIsUploadModalOpen(true);
-    e.target.value = ''; // Reset input
+    e.target.value = ''; // Reset input to allow selecting the same file again
   };
 
   /**
@@ -376,7 +381,16 @@ export default function App() {
       return;
     }
 
+    // Safe array conversion
     const files = Array.from(pendingFiles);
+    
+    if (files.length === 0) {
+      console.warn("No files in pendingFiles to upload.");
+      setIsUploadModalOpen(false);
+      setPendingFiles(null);
+      return;
+    }
+
     setPendingFiles(null);
     setIsUploadModalOpen(false);
     setIsUploading(true);
@@ -392,7 +406,14 @@ export default function App() {
         
         try {
           // 1. Resize and compress image to manage IndexedDB storage
-          const resizedBlob = await resizeImage(file, 1920, 1920);
+          // Loosened filtering: allow large images and .heic by using fallback if resizing fails
+          let processedBlob: Blob;
+          try {
+            processedBlob = await resizeImage(file, 1920, 1920);
+          } catch (resizeErr) {
+            console.warn(`Resizing failed for ${file.name} (Type: ${file.type}, Size: ${file.size}). Using original file.`, resizeErr);
+            processedBlob = file; // Fallback to original file if resizing fails (e.g., .heic or unsupported format)
+          }
           
           // 2. Extract EXIF data
           let takenAt: number;
@@ -404,6 +425,7 @@ export default function App() {
               takenAt = file.lastModified;
             }
           } catch (exifErr) {
+            console.warn(`EXIF extraction failed for ${file.name}:`, exifErr);
             takenAt = file.lastModified;
           }
 
@@ -418,18 +440,18 @@ export default function App() {
 
           photoEntries.push({
             childIds: uploadChildIds,
-            blob: resizedBlob,
+            blob: processedBlob,
             fileName: file.name,
-            fileSize: resizedBlob.size,
-            mimeType: resizedBlob.type,
+            fileSize: processedBlob.size,
+            mimeType: processedBlob.type,
             takenAt,
             ageInMonths,
             category,
             createdAt: Date.now()
           });
         } catch (fileErr) {
-          // Log error for specific file but continue with others
-          console.error(`Error processing file ${file.name}:`, fileErr);
+          // Log warning for specific file but continue with others
+          console.warn(`File ${file.name} was excluded from upload due to a processing error:`, fileErr);
         }
 
         setUploadProgress(prev => ({ ...prev, current: i + 1 }));
@@ -438,8 +460,9 @@ export default function App() {
       if (photoEntries.length > 0) {
         // Use bulkAdd for better performance
         await db.photos.bulkAdd(photoEntries);
-        alert(`${photoEntries.length}장의 사진이 성공적으로 업로드되었습니다.`);
+        // alert(`${photoEntries.length}장의 사진이 성공적으로 업로드되었습니다.`);
       } else {
+        console.warn("All selected files were filtered out or failed to process.");
         setError('업로드할 수 있는 사진이 없습니다.');
       }
       
@@ -815,7 +838,10 @@ export default function App() {
             >
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold text-[#4B4453]">이 사진에 누가 있나요?</h2>
-                <button onClick={() => setIsUploadModalOpen(false)} className="text-[#8E8E8E] hover:text-[#4B4453]">
+                <button onClick={() => {
+                  setIsUploadModalOpen(false);
+                  setPendingFiles(null);
+                }} className="text-[#8E8E8E] hover:text-[#4B4453]">
                   <X size={24} />
                 </button>
               </div>
@@ -853,7 +879,10 @@ export default function App() {
 
               <div className="flex gap-4">
                 <button 
-                  onClick={() => setIsUploadModalOpen(false)} 
+                  onClick={() => {
+                    setIsUploadModalOpen(false);
+                    setPendingFiles(null);
+                  }} 
                   className="flex-1 py-4 bg-[#FDF8F5] text-[#8E8E8E] rounded-2xl font-bold hover:bg-[#F5F0E8] transition-colors"
                 >
                   취소
@@ -964,7 +993,7 @@ export default function App() {
                     <input 
                       type="file" 
                       multiple 
-                      accept="image/*" 
+                      accept="image/*,.heic,.HEIC" 
                       className="hidden" 
                       disabled={!activeChildId}
                       onChange={handleFileSelect} 
