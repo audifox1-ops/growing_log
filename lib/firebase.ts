@@ -22,9 +22,11 @@ let auth: any;
 let db: any;
 let storage: any;
 
+const databaseId = process.env.NEXT_PUBLIC_FIREBASE_DATABASE_ID || "(default)";
+
 if (isConfigValid) {
   auth = getAuth(app);
-  db = getFirestore(app);
+  db = getFirestore(app, databaseId);
   storage = getStorage(app);
 } else {
   console.warn("Firebase configuration is missing. This might be normal during build-time (prerendering).");
