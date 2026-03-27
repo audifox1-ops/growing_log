@@ -411,7 +411,8 @@ export default function App() {
         contents: [{ parts: [{ text: `아이 이름: ${activeChild.name}` }, ...photoParts.flat()] }]
       });
 
-      const captions = JSON.parse(response.text);
+      // Vercel build fix: JSON.parse(response.text || "[]")
+      const captions = JSON.parse(response.text || "[]");
       if (Array.isArray(captions)) {
         setStoryboard(prev => prev.map((item, index) => ({
           ...item,
@@ -553,8 +554,8 @@ export default function App() {
                <div className="w-20 h-20 bg-[#A7C080]/10 rounded-full flex items-center justify-center text-[#A7C080] mx-auto"><Baby size={40} fill="currentColor" /></div>
                <div><h2 className="text-2xl font-bold">환영합니다, {user.displayName}님!</h2><p className="text-gray-400 mt-2">아이의 첫 번째 프로필을 만들어 보물 상자를 열어보세요.</p></div>
                <form onSubmit={handleAddChild} className="space-y-4">
-                 <input required type="text" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-4 bg-[#FDF8F5] rounded-2xl outline-none" placeholder="아이의 이름" />
-                 <input required type="date" value={newBirthDate} onChange={e => setNewBirthDate(e.target.value)} className="w-full p-4 bg-[#FDF8F5] rounded-2xl outline-none" />
+                 <input required type="text" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-4 bg-gray-50 rounded-2xl outline-none" placeholder="아이의 이름" />
+                 <input required type="date" value={newBirthDate} onChange={e => setNewBirthDate(e.target.value)} className="w-full p-4 bg-gray-50 rounded-2xl outline-none" />
                  <button type="submit" className="w-full bg-[#A7C080] text-white py-5 rounded-[24px] font-bold shadow-lg">상자 열기</button>
                </form>
             </div>
