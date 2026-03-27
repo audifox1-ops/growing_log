@@ -1,78 +1,39 @@
-// ===============================================================
-// Assumed Data Model
-// ===============================================================
-//
-// Collection: users
-// Document ID: {userId}
-// Fields:
-//   - email: string (required, email)
-//   - name: string (required)
-//   - createdAt: timestamp (required)
-//
-// Collection: children
-// Document ID: {childId}
-// Fields:
-//   - userId: string (required)
-//   - name: string (required)
-//   - birthDate: string (required, YYYY-MM-DD)
-//   - gender: string (optional)
-//
-// Collection: photos
-// Document ID: {photoId}
-// Fields:
-//   - childId: string (required)
-//   - url: string (required, uri)
-//   - dateTaken: timestamp (required)
-//   - estimatedAge: number (optional)
-//   - category: string (optional)
-//
-// Collection: videos
-// Document ID: {videoId}
-// Fields:
-//   - childId: string (required)
-//   - videoUrl: string (required, uri)
-//   - templateUsed: string (optional)
-//   - createdAt: timestamp (required)
-//
-// ===============================================================
-
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Helper: Always allow for Personal Edition (No-auth)
-    function isOpen() {
-      return true;
+    
+    // Helper: 로그인 여부 및 호출자 UID 확인
+    function isAuthorized(userId) {
+      return request.auth != null && request.auth.uid == userId;
     }
 
-    // Domain Validators (Simplified for MVP)
-    function isValidChild(data) {
-      return data.keys().hasAll(['name', 'birthDate']);
-    }
-
-    function isValidPhoto(data) {
-      return data.keys().hasAll(['childIds', 'imageUrl', 'takenAt']);
-    }
-
-    function isValidVideo(data) {
-      return data.keys().hasAll(['childId', 'title', 'scenes']);
-    }
-
-    // Rules
+    // 사용자 기반 계층 구조 (users/{userId}/...)
     match /users/{userId} {
-      allow read, write: if isOpen();
+      allow read, write: if isAuthorized(userId);
+
+      // 하위 컬렉션: 자녀, 사진, 영상 프로젝트
+      match /children/{childId} {
+        allow read, write: if isAuthorized(userId);
+      }
+
+      match /photos/{photoId} {
+        allow read, write: if isAuthorized(userId);
+      }
+
+      match /videoProjects/{projectId} {
+        allow read, write: if isAuthorized(userId);
+      }
     }
 
+    // 기존 최상위 컬렉션 (마이그레이션 과도기용 - 필요 시 삭제 가능)
     match /children/{childId} {
-      allow read, write: if isOpen();
+      allow read, write: if false; 
     }
-
     match /photos/{photoId} {
-      allow read, write: if isOpen();
+      allow read, write: if false;
     }
-
     match /videoProjects/{projectId} {
-      allow read, write: if isOpen();
+      allow read, write: if false;
     }
   }
 }

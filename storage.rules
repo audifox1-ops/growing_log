@@ -1,0 +1,25 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper: 로그인 여부 및 호출자 UID 확인
+    function isAuthorized(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // 사진 전용 경로: images/{userId}/{allPaths=**}
+    match /images/{userId}/{allPaths=**} {
+      allow read, write: if isAuthorized(userId);
+    }
+
+    // 사용자의 직접적인 users/ 경로 (필요 시)
+    match /users/{userId}/{allPaths=**} {
+      allow read, write: if isAuthorized(userId);
+    }
+
+    // 기본 규칙 (다른 경로는 차단)
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
