@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Baby, Plus, Trash2, X, Camera, Loader2, AlertCircle, Check, Video, Upload, Calendar, Clock, Image as ImageIcon, Save, Play, Edit3, List, ArrowLeft, Sparkles, Layout, LogOut, User as UserIcon
+  Baby, Plus, Trash2, X, Camera, Loader2, AlertCircle, Check, Video, Upload, Calendar, Clock, Image as ImageIcon, Save, Play, Edit3, List, ArrowLeft, Sparkles, Layout, LogOut, User as UserIcon, MessageSquare
 } from 'lucide-react';
 import exifr from 'exifr';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -29,9 +29,20 @@ const BlobImage = ({ blob, alt, ...props }: any) => {
     return () => URL.revokeObjectURL(newUrl);
   }, [blob]);
   if (hasError || !url) {
-    return <div className="w-full h-full bg-gray-100 flex items-center justify-center text-gray-300"><ImageIcon size={24} /></div>;
+    return <div className="w-full h-full bg-[#F3F0E9] flex items-center justify-center text-gray-300"><ImageIcon size={24} /></div>;
   }
   return <Image src={url} alt={alt || "이미지"} onError={() => setHasError(true)} {...props} />;
+};
+
+// --- Framer Motion Variants ---
+const fadeInUp = {
+  hidden: { opacity: 0, y: 30 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: "easeOut" } }
+};
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.1 } }
 };
 
 export default function App() {
@@ -57,6 +68,7 @@ export default function App() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
   const [uploadChildIds, setUploadChildIds] = useState<string[]>([]);
+  const [pendingCaption, setPendingCaption] = useState(''); // [NEW] 한 줄 메모 상태
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
 
@@ -197,6 +209,7 @@ export default function App() {
     if (!activeChildId) { alert('아이를 먼저 선택해 주세요.'); return; }
     setPendingFiles(Array.from(files));
     setUploadChildIds([activeChildId]);
+    setPendingCaption(''); // 리셋 메모
     setIsUploadModalOpen(true);
     e.target.value = '';
   };
@@ -221,7 +234,6 @@ export default function App() {
         const ageInMonths = activeChild ? calculateAgeInMonths(activeChild.birthDate, takenAt) : 0;
         let category = ageInMonths <= 12 ? "영아기" : ageInMonths <= 36 ? "유아기" : "아동기";
         
-        // Firestore Base64 업로드 수행
         await firebaseService.uploadPhoto(user.uid, file, { 
           childIds: uploadChildIds, 
           fileName: file.name, 
@@ -229,7 +241,8 @@ export default function App() {
           mimeType: file.type || 'image/jpeg', 
           takenAt, 
           ageInMonths, 
-          category 
+          category,
+          caption: pendingCaption // [NEW] 입력받은 메모 저장
         });
         setUploadProgress(prev => ({ ...prev, current: prev.current + 1 }));
       }));
@@ -240,6 +253,7 @@ export default function App() {
       setIsUploading(false); 
       setPendingFiles(null); 
       setUploadChildIds([]); 
+      setPendingCaption('');
     }
   };
 
@@ -295,144 +309,348 @@ export default function App() {
   // --- Views ---
 
   const LoginView = () => (
-    <div className="min-h-screen flex items-center justify-center bg-[#FDF8F5] p-6 relative z-10 overflow-hidden">
-      <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="max-w-md w-full bg-white p-12 rounded-[50px] shadow-2xl text-center space-y-10 relative z-20">
-        <div className="w-24 h-24 bg-[#A7C080]/10 rounded-full flex items-center justify-center text-[#A7C080] mx-auto marker:bg-none"><Baby size={48} fill="currentColor" /></div>
-        <div><h1 className="text-4xl font-black text-[#4B4453] mb-4 tracking-tight">성장 기록함</h1><p className="text-[#8E8E8E] leading-relaxed">자녀의 소중한 모든 순간을<br />클라우드에 안전하게 보관하세요.</p></div>
+    <div className="min-h-screen flex items-center justify-center bg-[#FDF8F5] p-6 relative z-10 overflow-hidden font-sans">
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="max-w-md w-full bg-white p-12 rounded-[60px] shadow-2xl text-center space-y-10 relative z-20">
+        <div className="w-24 h-24 bg-[#A7C080]/10 rounded-full flex items-center justify-center text-[#A7C080] mx-auto opacity-80"><Baby size={48} fill="currentColor" /></div>
+        <div>
+          <h1 className="text-4xl font-black text-[#4B4453] mb-4 tracking-tighter">성장 기록함</h1>
+          <p className="text-[#8E8E8E] leading-relaxed font-medium">따뜻한 기억들을<br />하나씩 상자에 담아보세요.</p>
+        </div>
         <div className="relative z-30">
           <div className="space-y-4">
-            {isLoading && <div className="flex justify-center flex-col items-center gap-4 py-4 animate-pulse"><Loader2 className="animate-spin text-[#A7C080]" size={32} /><p className="text-xs text-gray-400 font-black">인증 처리 중...</p></div>}
-            <button type="button" onClick={handleLogin} disabled={false} className="w-full relative z-[100] flex items-center justify-center gap-4 bg-white border-2 border-[#E5E5E5] hover:border-[#A7C080] py-5 rounded-3xl font-black text-[#4B4453] transition-all group active:scale-95 shadow-sm hover:shadow-xl"><Image src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width={24} height={24} alt="G" /><span className="text-xl">상자 열기</span></button>
+            {isLoading && <div className="flex justify-center flex-col items-center gap-4 py-4 animate-pulse"><Loader2 className="animate-spin text-[#A7C080]" size={32} /><p className="text-xs text-[#A7C080] font-black uppercase tracking-widest">분주하게 준비 중</p></div>}
+            <button type="button" onClick={handleLogin} className="w-full relative z-[100] flex items-center justify-center gap-4 bg-white border-2 border-[#F3EDEA] hover:border-[#A7C080] py-5 rounded-[32px] font-black text-[#4B4453] transition-all hover:bg-[#FDF8F5] active:scale-[0.98] shadow-sm"><Image src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width={24} height={24} alt="G" /><span className="text-xl">상자 열기</span></button>
           </div>
         </div>
-        <p className="text-[11px] text-[#BDBDBD]">구글 로그인 시 실시간 데이터가 동기화됩니다.</p>
       </motion.div>
     </div>
   );
 
-  if (!mounted || authLoading) return <div className="min-h-screen flex flex-col items-center justify-center bg-[#FDF8F5]"><Baby size={48} className="text-[#A7C080] animate-bounce" /><p className="mt-4 text-[#8E8E8E] font-black uppercase tracking-widest text-xs">보물상자 준비 중...</p></div>;
+  if (!mounted || authLoading) return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-[#FDF8F5]">
+      <motion.div animate={{ scale: [1, 1.1, 1], rotate: [0, 5, -5, 0] }} transition={{ repeat: Infinity, duration: 2 }} className="text-[#A7C080]"><Baby size={64} fill="currentColor" /></motion.div>
+      <p className="mt-8 text-[#A7C080] font-black uppercase tracking-[0.2em] text-[10px]">상자를 가져오는 중</p>
+    </div>
+  );
+
   if (!user) return <LoginView />;
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FDF8F5] text-[#4B4453]">
-      <AnimatePresence>{error && <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="fixed top-6 left-1/2 -translate-x-1/2 z-[200] bg-white border-2 border-red-100 text-red-500 px-8 py-4 rounded-3xl shadow-2xl flex items-center gap-4"><AlertCircle size={20} /><span>{error}</span><button onClick={() => setError(null)}><X size={20} /></button></motion.div>}</AnimatePresence>
-      <AnimatePresence>{isUploading && <div className="fixed inset-0 z-[100] bg-[#4B4453]/60 backdrop-blur-md flex items-center justify-center p-6"><div className="bg-white p-10 rounded-[40px] shadow-2xl max-w-sm w-full text-center space-y-6"><div className="relative w-24 h-24 mx-auto"><svg className="w-full h-full" viewBox="0 0 100 100"><circle className="text-[#FDF8F5] stroke-current" strokeWidth="8" cx="50" cy="50" r="40" fill="transparent" /><motion.circle className="text-[#A7C080] stroke-current" strokeWidth="8" strokeLinecap="round" cx="50" cy="50" r="40" fill="transparent" strokeDasharray="251.2" animate={{ strokeDashoffset: 251.2 - (251.2 * (uploadProgress.current / uploadProgress.total)) }}/></svg><div className="absolute inset-0 flex items-center justify-center font-black text-[#A7C080] text-xl">{Math.round((uploadProgress.current/uploadProgress.total)*100)}%</div></div><p className="text-[#8E8E8E] text-sm">클라우드 동기화 {uploadProgress.current} / {uploadProgress.total}</p></div></div>}</AnimatePresence>
-      <AnimatePresence>{isUploadModalOpen && <div className="fixed inset-0 bg-[#4B4453]/40 backdrop-blur-sm z-[110] flex items-center justify-center p-6"><motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white w-full max-w-md p-8 rounded-[40px] shadow-2xl"><div className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold">기록 추가하기</h2><button onClick={() => setIsUploadModalOpen(false)}><X size={24} /></button></div><div className="space-y-3 mb-8">{children?.map(child => <label key={child.id} className={`flex items-center gap-4 p-4 rounded-2xl border-2 cursor-pointer ${uploadChildIds.includes(child.id!) ? 'border-[#A7C080] bg-[#A7C080]/5' : 'border-[#FDF8F5] bg-[#FDF8F5]'}`}><input type="checkbox" className="hidden" checked={uploadChildIds.includes(child.id!)} onChange={() => setUploadChildIds(prev => prev.includes(child.id!) ? prev.filter(id => id !== child.id) : [...prev, child.id!])} /><div className="w-10 h-10 bg-[#A7C080] rounded-xl flex items-center justify-center text-white font-bold">{child.name[0]}</div><span className="font-bold flex-1">{child.name}</span>{uploadChildIds.includes(child.id!) && <Check size={20} className="text-[#A7C080]" />}</label>)}</div><button onClick={startUpload} className="w-full py-5 bg-[#A7C080] text-white rounded-[24px] font-bold">업로드 시작</button></motion.div></div>}</AnimatePresence>
+    <div className="min-h-screen flex flex-col bg-[#FDF8F5] text-[#4B4453] font-sans selection:bg-[#A7C080]/20">
+      <AnimatePresence>
+        {error && (
+          <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="fixed top-6 left-1/2 -translate-x-1/2 z-[300] bg-white border-2 border-red-50 px-8 py-4 rounded-[24px] shadow-2xl flex items-center gap-4">
+            <AlertCircle size={20} className="text-red-400" />
+            <span className="font-bold text-red-500 text-sm">{error}</span>
+            <button onClick={() => setError(null)} className="text-gray-300 hover:text-gray-500"><X size={20} /></button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isUploading && (
+          <div className="fixed inset-0 z-[250] bg-[#4B4453]/40 backdrop-blur-lg flex items-center justify-center p-6">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white p-12 rounded-[60px] shadow-2xl max-w-sm w-full text-center space-y-8">
+              <div className="relative w-32 h-32 mx-auto">
+                <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                  <circle className="text-[#F3EDEA] stroke-current" strokeWidth="6" cx="50" cy="50" r="44" fill="transparent" />
+                  <motion.circle className="text-[#A7C080] stroke-current" strokeWidth="6" strokeLinecap="round" cx="50" cy="50" r="44" fill="transparent" strokeDasharray="276.5" animate={{ strokeDashoffset: 276.5 - (276.5 * (uploadProgress.current / uploadProgress.total)) }} transition={{ duration: 0.5 }} />
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center font-black text-[#A7C080] text-3xl">{Math.round((uploadProgress.current/uploadProgress.total)*100)}%</div>
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-2xl font-black">기억을 소중히 담는 중</h3>
+                <p className="text-[#8E8E8E] text-sm font-medium">{uploadProgress.current} / {uploadProgress.total} 사진 동기화</p>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isUploadModalOpen && (
+          <div className="fixed inset-0 bg-[#4B4453]/30 backdrop-blur-md z-[200] flex items-center justify-center p-6">
+            <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white w-full max-w-md p-10 rounded-[60px] shadow-2xl relative">
+              <button onClick={() => setIsUploadModalOpen(false)} className="absolute top-8 right-8 text-gray-300 hover:text-gray-500 transition-colors"><X size={32} /></button>
+              <div className="mb-10 text-center">
+                <h2 className="text-3xl font-black mb-2">오늘의 일기 한 줄</h2>
+                <p className="text-gray-400 font-medium">기억하고 싶은 말을 남겨보세요.</p>
+              </div>
+              
+              <div className="space-y-6">
+                <div className="space-y-3">
+                  <label className="text-[10px] text-gray-400 font-black tracking-widest ml-3 uppercase">누구의 사진인가요?</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    {children?.map(child => (
+                      <button key={child.id} onClick={() => setUploadChildIds(prev => prev.includes(child.id!) ? prev.filter(id => id !== child.id) : [...prev, child.id!])} className={`flex items-center gap-3 p-4 rounded-[24px] border-2 transition-all ${uploadChildIds.includes(child.id!) ? 'border-[#A7C080] bg-[#A7C080]/5' : 'border-[#FDF8F5] bg-[#FDF8F5]'}`}>
+                        <div className="w-8 h-8 bg-[#A7C080] rounded-xl flex items-center justify-center text-white font-black text-xs">{child.name[0]}</div>
+                        <span className="font-bold text-sm">{child.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-[10px] text-gray-400 font-black tracking-widest ml-3 uppercase">한 줄 메모</label>
+                  <textarea value={pendingCaption} onChange={e => setPendingCaption(e.target.value)} className="w-full p-6 bg-[#FDF8F5] rounded-[32px] outline-none font-medium text-sm h-32 resize-none border-2 border-transparent focus:border-[#A7C080]/30" placeholder="아이가 오늘 처음으로 웃었어요!" />
+                </div>
+                
+                <button onClick={startUpload} className="w-full py-6 bg-[#A7C080] text-white rounded-[32px] font-black text-xl shadow-lg hover:bg-[#8FA86A] transition-all transform hover:-translate-y-1 active:translate-y-0">상자에 담기</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence mode="wait">
         {view === 'onboarding' && (
-          <motion.div key="onboarding" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex items-center justify-center p-6 relative z-10">
-            <div className="max-w-md w-full bg-white p-12 rounded-[50px] shadow-2xl text-center space-y-8 relative z-20 pointer-events-auto">
+          <motion.div key="onboarding" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex-1 flex items-center justify-center p-6">
+            <div className="max-w-md w-full bg-white p-12 rounded-[60px] shadow-2xl text-center space-y-8 relative overflow-hidden">
                <div className="w-20 h-20 bg-[#A7C080]/10 rounded-full flex items-center justify-center text-[#A7C080] mx-auto"><Baby size={40} fill="currentColor" /></div>
-               <div><h2 className="text-2xl font-black">{user.displayName}님, 환영합니다!</h2><p className="text-gray-400 mt-2 font-bold">아이의 첫 번째 프로필을 만들어 상자를 열어보세요.</p></div>
-               <form onSubmit={handleAddChild} className="space-y-6 relative z-30 pointer-events-auto">
-                 <div className="space-y-2 text-left"><label className="text-[10px] text-gray-400 font-black ml-2 uppercase">아이 이름</label><input required type="text" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-5 bg-gray-50 rounded-2xl outline-none font-bold border-2 border-transparent focus:border-[#A7C080]/20" placeholder="이름" /></div>
-                 <div className="space-y-2 text-left"><label className="text-[10px] text-gray-400 font-black ml-2 uppercase">생년월일</label><input required type="date" value={newBirthDate} onChange={e => setNewBirthDate(e.target.value)} className="w-full p-5 bg-gray-50 rounded-2xl outline-none font-bold border-2 border-transparent focus:border-[#A7C080]/20" /></div>
-                 <button type="submit" disabled={isLoading} className="w-full relative z-[50] bg-[#A7C080] text-white py-5 rounded-[28px] font-black shadow-lg flex items-center justify-center gap-3 disabled:opacity-70">{isLoading ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}<span>상자 열기</span></button>
+               <div className="space-y-2">
+                 <h2 className="text-2xl font-black tracking-tight">{user.displayName}님, 반가워요!</h2>
+                 <p className="text-gray-400 font-medium">아이의 상자를 처음 열기 위해 이름과 생일을 적어보세요.</p>
+               </div>
+               <form onSubmit={handleAddChild} className="space-y-6 text-left">
+                 <div className="space-y-2">
+                   <label className="text-[10px] text-gray-300 font-black ml-4 uppercase tracking-[0.2em]">아이 이름</label>
+                   <input required type="text" value={newName} onChange={e => setNewName(e.target.value)} className="w-full p-6 bg-[#FDF8F5] rounded-[28px] outline-none font-bold border-2 border-transparent focus:border-[#A7C080]/20" placeholder="이름" />
+                 </div>
+                 <div className="space-y-2 text-left">
+                   <label className="text-[10px] text-gray-300 font-black ml-4 uppercase tracking-[0.2em]">생년월일</label>
+                   <input required type="date" value={newBirthDate} onChange={e => setNewBirthDate(e.target.value)} className="w-full p-6 bg-[#FDF8F5] rounded-[28px] outline-none font-bold border-2 border-transparent focus:border-[#A7C080]/20" />
+                 </div>
+                 <button type="submit" disabled={isLoading} className="w-full bg-[#A7C080] text-white py-6 rounded-[32px] font-black shadow-lg flex items-center justify-center gap-3 disabled:opacity-70 text-lg">{isLoading ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}<span>상자 열기</span></button>
                </form>
             </div>
           </motion.div>
         )}
 
         {view === 'dashboard' && (
-          <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col">
-            <header className="bg-white border-b border-[#A7C080]/10 sticky top-0 z-30 p-4 shadow-sm backdrop-blur-md bg-white/80">
-              <div className="max-w-7xl mx-auto flex justify-between items-center">
-                <button onClick={() => setView('profiles')} className="flex items-center gap-4 bg-[#FDF8F5] p-2 pr-6 rounded-2xl border border-[#A7C080]/10 hover:shadow-md transition-all">
-                  <div className="w-10 h-10 bg-[#A7C080] rounded-xl flex items-center justify-center text-white overflow-hidden relative">{activeChild?.profileImageUrl ? <BlobImage blob={activeChild.profileImageUrl} fill className="object-cover" alt="P" /> : <Baby size={20} />}</div>
-                  <div className="text-left"><h2 className="text-sm font-black">{activeChild?.name}</h2><p className="text-[10px] text-gray-400">성장 기록함</p></div>
-                </button>
-                <div className="flex items-center gap-4">
-                  <div className="sm:flex items-center gap-3 bg-gray-50 p-2 rounded-2xl border border-gray-100 hidden">
-                    <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-white shadow-sm relative flex items-center justify-center bg-gray-100">
-                      {/* [IMPROVED] 구글 프로필 이미지 Fallback 및 unoptimized 적용 */}
-                      {user.photoURL && !profileImgError ? (
-                        <Image 
-                          src={user.photoURL} 
-                          width={32} 
-                          height={32} 
-                          alt="U" 
-                          unoptimized
-                          className="w-full h-full object-cover"
-                          onError={() => setProfileImgError(true)}
-                        />
-                      ) : (
-                        <UserIcon size={16} className="text-gray-400" />
-                      )}
-                    </div>
-                    <span className="text-sm font-bold truncate max-w-[100px]">{user.displayName}</span>
-                    <button onClick={handleLogout} className="text-gray-300 hover:text-red-400"><LogOut size={16} /></button>
+          <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex-1 flex flex-col pt-4">
+            <header className="px-6 py-6 sticky top-0 z-[100] max-w-7xl mx-auto w-full">
+              <nav className="bg-white/80 backdrop-blur-2xl px-6 py-4 rounded-[40px] shadow-sm border border-white/40 flex justify-between items-center transition-all hover:shadow-md">
+                <button onClick={() => setView('profiles')} className="flex items-center gap-4 group">
+                  <div className="w-12 h-12 bg-[#F3EDEA] rounded-[20px] flex items-center justify-center text-[#A7C080] overflow-hidden relative shadow-inner ring-4 ring-[#FDF8F5] group-hover:scale-110 transition-transform">
+                    {activeChild?.profileImageUrl ? <BlobImage blob={activeChild.profileImageUrl} fill className="object-cover" alt="P" /> : <Baby size={22} fill="currentColor" opacity="0.5" />}
                   </div>
-                  <button onClick={() => setView('video-list')} className="p-3 bg-[#FDF8F5] text-[#8E8E8E] rounded-2xl"><List size={20} /></button>
-                  {/* [IMPROVED] 업로드 상태 피드백 강화 */}
-                  <label className="flex items-center gap-2 px-6 py-3 bg-[#A7C080] text-white rounded-2xl font-bold cursor-pointer hover:bg-[#8FA86A] shadow-md transition-all">
-                    {isUploading ? <Loader2 size={18} className="animate-spin" /> : <Upload size={18} />}
-                    <span>{isUploading ? '기록 중...' : '기록하기'}</span>
+                  <div className="text-left">
+                    <h2 className="text-base font-black tracking-tight flex items-center gap-2">{activeChild?.name}<Calendar size={12} className="text-[#A7C080] opacity-50" /></h2>
+                    <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">{activeChild && formatAge(calculateAgeInMonths(activeChild.birthDate, Date.now()))}</p>
+                  </div>
+                </button>
+                
+                <div className="flex items-center gap-4">
+                  <div className="hidden sm:flex items-center gap-4 bg-[#FDF8F5] px-5 py-3 rounded-[24px] border border-[#F3EDEA]">
+                    <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-white shadow-sm relative flex items-center justify-center bg-[#F3EDEA]">
+                      {user.photoURL && !profileImgError ? (
+                        <Image src={user.photoURL} width={32} height={32} alt="U" unoptimized className="w-full h-full object-cover" onError={() => setProfileImgError(true)} />
+                      ) : ( <UserIcon size={16} className="text-[#A7C080] opacity-40" /> )}
+                    </div>
+                    <span className="text-xs font-black text-[#8E8E8E] tracking-tight">{user.displayName}</span>
+                    <button onClick={handleLogout} className="text-[#E5E5E5] hover:text-red-400 transition-colors"><LogOut size={16} /></button>
+                  </div>
+                  <button onClick={() => setView('video-list')} className="p-4 bg-[#FDF8F5] text-gray-400 rounded-[22px] hover:bg-[#A7C080]/10 hover:text-[#A7C080] transition-all"><List size={22} /></button>
+                  <label className="flex items-center gap-3 px-8 py-4 bg-[#A7C080] text-white rounded-[24px] font-black cursor-pointer hover:bg-[#8FA86A] shadow-xl shadow-[#A7C080]/20 transition-all hover:-translate-y-0.5 active:translate-y-0">
+                    {isUploading ? <Loader2 size={20} className="animate-spin" /> : <Camera size={20} />}
+                    <span className="text-base">{isUploading ? '저장 중' : '담기'}</span>
                     <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileSelect} disabled={isUploading}/>
                   </label>
                 </div>
-              </div>
+              </nav>
             </header>
-            <main className="flex-1 p-8 max-w-7xl mx-auto w-full">
+            
+            <main className="flex-1 px-8 pb-32 max-w-7xl mx-auto w-full">
               {photos === undefined ? (
-                <div className="h-[60vh] flex flex-col items-center justify-center gap-4"><Loader2 className="animate-spin text-[#A7C080]" size={48} /><p className="text-gray-400 font-bold">도착 확인 중...</p></div>
+                <div className="h-[60vh] flex flex-col items-center justify-center gap-6"><Loader2 className="animate-spin text-[#A7C080] opacity-30" size={64} /><p className="text-gray-300 font-black tracking-widest text-xs uppercase">상자를 뒤적거리는 중</p></div>
               ) : photos.length === 0 ? (
-                <div className="h-[60vh] flex flex-col items-center justify-center text-center space-y-6 opacity-40"><div className="w-32 h-32 bg-gray-100 rounded-full flex items-center justify-center"><Camera size={48} className="text-gray-400" /></div><div><h1 className="text-2xl font-bold">비어 있는 상자</h1><p className="text-[#8E8E8E] mt-2">아이의 소중한 순간을 채워주세요.</p></div></div>
+                <div className="h-[65vh] flex flex-col items-center justify-center text-center space-y-8 animate-in fade-in zoom-in duration-1000">
+                  <div className="w-40 h-40 bg-white/50 rounded-[60px] flex items-center justify-center shadow-inner ring-8 ring-white/30"><ImageIcon size={64} className="text-[#F3EDEA]" /></div>
+                  <div className="space-y-3">
+                    <h1 className="text-3xl font-black tracking-tighter text-gray-400/50">아직 텅 비어있는 상자</h1>
+                    <p className="text-[#8E8E8E] font-medium text-lg">아이의 예쁜 순간들을 하나씩 소중하게<br />이 상자에 가득 채워주세요.</p>
+                  </div>
+                </div>
               ) : (
-                <div className="space-y-20 pb-40">
+                <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-32 mt-12">
                   {groupedPhotos?.map((group) => (
-                    <section key={group.monthYear} className="space-y-8">
-                      <div className="flex items-center gap-4"><h3 className="text-xl font-black text-[#A7C080]">{group.monthYear}</h3><div className="h-px bg-[#A7C080]/10 flex-1" /></div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                    <section key={group.monthYear} className="space-y-12 relative">
+                      <div className="sticky top-[150px] z-20 pointer-events-none">
+                        <div className="flex items-center gap-6 bg-[#FDF8F5]/80 backdrop-blur-sm py-4 inline-flex pr-6 rounded-r-3xl">
+                          <h3 className="text-3xl font-black text-[#A7C080] tracking-tight pl-2">{group.monthYear}</h3>
+                          <div className="flex-1 h-[2px] w-24 bg-[#A7C080]/10 rounded-full" />
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-10">
                         {group.items.map((photo) => (
-                          <motion.div key={photo.id} onClick={() => togglePhotoSelection(photo.id!)} className={`group relative aspect-square bg-white rounded-[32px] overflow-hidden border-4 shadow-sm transition-all cursor-pointer ${selectedPhotoIds.includes(photo.id!) ? 'border-[#A7C080] scale-95' : 'border-transparent'}`}>
-                            <BlobImage blob={photo.imageUrl} fill className="object-cover" alt="Art" />
-                            {selectedPhotoIds.includes(photo.id!) && <div className="absolute inset-0 bg-[#A7C080]/30 backdrop-blur-[1px] flex items-center justify-center"><div className="bg-white p-2 rounded-full text-[#A7C080] shadow-xl"><Check size={24} strokeWidth={4} /></div></div>}
-                            <div className="absolute top-2 left-2 px-3 py-1 bg-white/80 backdrop-blur-md rounded-xl text-[10px] font-black text-[#A7C080] shadow-sm">{formatAge(photo.ageInMonths)}</div>
+                          <motion.div variants={fadeInUp} viewport={{ once: true }} key={photo.id} onClick={() => togglePhotoSelection(photo.id!)} className={`group relative flex flex-col bg-white p-4 rounded-[48px] shadow-sm transition-all hover:shadow-2xl hover:scale-[1.02] border-4 ${selectedPhotoIds.includes(photo.id!) ? 'border-[#A7C080]' : 'border-white'} cursor-pointer`}>
+                            <div className="aspect-[4/5] relative rounded-[36px] overflow-hidden mb-5 bg-[#FDF8F5]">
+                              <BlobImage blob={photo.imageUrl} fill className="object-cover" alt="Memory" />
+                              {selectedPhotoIds.includes(photo.id!) && (
+                                <div className="absolute inset-0 bg-[#A7C080]/20 backdrop-blur-[2px] flex items-center justify-center">
+                                  <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="bg-white p-3 rounded-full text-[#A7C080] shadow-2xl ring-4 ring-white/50"><Check size={32} strokeWidth={4} /></motion.div>
+                                </div>
+                              )}
+                              <div className="absolute top-4 left-4 px-4 py-2 bg-white/90 backdrop-blur-md rounded-[18px] text-[10px] font-black text-[#A7C080] shadow-sm tracking-tight">{formatAge(photo.ageInMonths)}</div>
+                              <button onClick={(e) => { e.stopPropagation(); handleDeletePhoto(photo.id!); }} className="absolute top-4 right-4 p-3 bg-red-400/90 text-white rounded-[18px] opacity-0 group-hover:opacity-100 transition-all hover:bg-red-500 hover:scale-110 shadow-lg"><Trash2 size={18} /></button>
+                              <button onClick={(e) => { e.stopPropagation(); handleEditPhoto(photo); }} className="absolute bottom-4 right-4 p-3 bg-[#A7C080]/90 text-white rounded-[18px] opacity-0 group-hover:opacity-100 transition-all hover:bg-[#8FA86A] hover:scale-110 shadow-lg"><Edit3 size={18} /></button>
+                            </div>
                             
-                            {/* [NEW] 갤러리 카드 삭제 버튼 (홉버 시 노출) */}
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); handleDeletePhoto(photo.id!); }} 
-                              className="absolute top-2 right-2 p-2 bg-red-500/80 text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all shadow-lg hover:bg-red-600"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-
-                            <button onClick={(e) => { e.stopPropagation(); handleEditPhoto(photo); }} className="absolute bottom-2 right-2 p-2 bg-black/20 text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all"><Edit3 size={14} /></button>
+                            <div className="px-4 pb-4 text-center">
+                              {photo.caption ? (
+                                <p className="text-base font-bold text-[#4B4453]/80 leading-relaxed italic line-clamp-2">" {photo.caption} "</p>
+                              ) : (
+                                <p className="text-xs font-black uppercase text-[#E5E5E5] tracking-[0.2em] italic">No Memo</p>
+                              )}
+                              <div className="flex items-center justify-center mt-3 text-[10px] font-black text-[#BDBDBD] uppercase tracking-widest gap-2">
+                                <Clock size={10} /> {new Date(photo.takenAt).toLocaleDateString()}
+                              </div>
+                            </div>
                           </motion.div>
                         ))}
                       </div>
                     </section>
                   ))}
-                </div>
+                </motion.div>
               )}
             </main>
-            <AnimatePresence>{selectedPhotoIds.length > 0 && <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="fixed bottom-10 left-1/2 -translate-x-1/2 z-40 bg-[#4B4453] text-white p-5 rounded-[40px] shadow-2xl flex items-center justify-between border border-white/10 backdrop-blur-xl w-full max-w-sm"><span className="font-bold ml-4">{selectedPhotoIds.length}개 선택</span><div className="flex gap-4"><button onClick={() => setSelectedPhotoIds([])} className="text-sm text-gray-400 px-2">해제</button><button onClick={startNewVideoProject} className="bg-[#A7C080] px-6 py-4 rounded-[28px] font-black flex items-center gap-2"><Video size={20} /> 영상 제작</button></div></motion.div>}</AnimatePresence>
+            <AnimatePresence>
+              {selectedPhotoIds.length > 0 && (
+                <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }} className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[150] bg-[#4B4453] bg-opacity-95 backdrop-blur-2xl text-white px-8 py-5 rounded-[40px] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.5)] flex items-center justify-between border border-white/10 w-full max-w-sm">
+                  <div className="flex flex-col">
+                    <span className="font-black text-xs uppercase tracking-widest opacity-50 mb-1">Selected</span>
+                    <span className="text-xl font-black">{selectedPhotoIds.length}장의 사진</span>
+                  </div>
+                  <div className="flex gap-3">
+                    <button onClick={() => setSelectedPhotoIds([])} className="p-4 text-gray-400 hover:text-white transition-colors"><X size={24} /></button>
+                    <button onClick={startNewVideoProject} className="bg-[#A7C080] px-8 py-4 rounded-[28px] font-black flex items-center gap-3 transition-all hover:bg-[#8FA86A] hover:scale-105 active:scale-95"><Video size={22} fill="currentColor" /> 영상 제작</button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         )}
 
         {view === 'video-editor' && (
-          <motion.div key="video-editor" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col bg-white">
-            <header className="p-6 border-b flex justify-between items-center sticky top-0 bg-white z-40"><div className="flex items-center gap-6"><button onClick={() => setView('dashboard')} className="p-3 bg-gray-50 rounded-2xl"><ArrowLeft size={24} /></button><input type="text" value={projectTitle} onChange={e => setProjectTitle(e.target.value)} className="text-2xl font-black outline-none border-b-4 border-transparent focus:border-[#A7C080]" /></div><button onClick={saveVideoProject} className="bg-[#A7C080] text-white px-8 py-4 rounded-[24px] font-black shadow-lg flex items-center gap-2"><Save size={20} /> 저장</button></header>
-            <main className="flex-1 grid grid-cols-1 lg:grid-cols-2 overflow-hidden">
-               <div className="p-10 overflow-y-auto space-y-6 border-r border-gray-50"><div className="flex justify-between items-center mb-4"><h3 className="text-xl font-black">장면 구성</h3><button onClick={generateAiCaptions} disabled={isGeneratingCaptions} className="flex items-center gap-2 px-6 py-3 bg-[#A7C080]/10 text-[#A7C080] rounded-2xl font-bold transition-all">{isGeneratingCaptions ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />} AI 자막</button></div>
-                  <div className="space-y-4 pb-20">{storyboard.map((item, index) => { const photo = photos?.find(p => p.id === item.photoId); return <motion.div layout key={index} className="bg-gray-50 p-5 rounded-[32px] flex gap-6 relative group border border-gray-100"><div className="w-32 h-32 relative rounded-3xl overflow-hidden shrink-0"><BlobImage blob={photo?.imageUrl} fill className="object-cover" alt="S" /></div><div className="flex-1 space-y-3 pt-1"><div className="flex justify-between items-center text-[10px] text-gray-400 font-black tracking-widest"><span>SCENE {index + 1}</span><span>{item.duration}s</span></div><textarea value={item.caption} onChange={e => { const n = [...storyboard]; n[index].caption = e.target.value; setStoryboard(n); }} className="w-full p-4 bg-white rounded-2xl outline-none text-sm h-28 resize-none border border-transparent focus:border-[#A7C080]/30 shadow-sm" placeholder="따뜻한 자막을 남겨주세요." /></div><button onClick={() => setStoryboard(prev => prev.filter((_, i) => i !== index))} className="absolute -top-2 -right-2 p-2 bg-white text-gray-200 hover:text-red-400 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-all border border-gray-100"><Trash2 size={16} /></button></motion.div>; })}</div>
+          <motion.div key="video-editor" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex-1 flex flex-col bg-white">
+            <header className="p-8 border-b-2 border-[#FDF8F5] flex justify-between items-center sticky top-0 bg-white/95 backdrop-blur-md z-[110]">
+              <div className="flex items-center gap-8">
+                <button onClick={() => setView('dashboard')} className="p-4 bg-[#FDF8F5] rounded-[24px] text-gray-400 hover:bg-[#A7C080]/10 hover:text-[#A7C080] transition-all transform hover:scale-110 active:scale-95"><ArrowLeft size={28} /></button>
+                <div className="space-y-1">
+                  <input type="text" value={projectTitle} onChange={e => setProjectTitle(e.target.value)} className="text-3xl font-black outline-none bg-transparent placeholder-gray-200 focus:text-[#A7C080] transition-colors" placeholder="제목 없는 기록 상자" />
+                  <p className="text-[10px] text-gray-300 font-black uppercase tracking-[0.3em]">Moment Studio</p>
+                </div>
+              </div>
+              <button onClick={saveVideoProject} className="bg-[#A7C080] text-white px-10 py-5 rounded-[28px] font-black shadow-xl shadow-[#A7C080]/20 flex items-center gap-3 hover:bg-[#8FA86A] transition-all hover:-translate-y-1 active:translate-y-0 active:scale-95"><Save size={22} /> <span className="text-lg text-white">상자에 보관</span></button>
+            </header>
+
+            <main className="flex-1 grid grid-cols-1 lg:grid-cols-2 overflow-hidden bg-[#FDF8F5]">
+               <div className="p-10 overflow-y-auto bg-white rounded-tr-[80px] shadow-inner space-y-10">
+                  <div className="flex justify-between items-center bg-[#FDF8F5] p-8 rounded-[40px]">
+                    <div>
+                      <h3 className="text-2xl font-black tracking-tight text-[#4B4453]">장면 구성</h3>
+                      <p className="text-sm text-gray-400 font-medium">소중한 순간들을 영화처럼 배열해 보세요.</p>
+                    </div>
+                    <button onClick={generateAiCaptions} disabled={isGeneratingCaptions} className="flex items-center gap-3 px-8 py-5 bg-white text-[#A7C080] rounded-[24px] font-black transition-all hover:bg-[#A7C080] hover:text-white shadow-sm active:scale-95 disabled:opacity-50">
+                      {isGeneratingCaptions ? <Loader2 size={22} className="animate-spin" /> : <Sparkles size={22} />}
+                      <span className="text-base">AI 감성 자막</span>
+                    </button>
+                  </div>
+
+                  <div className="space-y-8 pb-32">
+                    {storyboard.map((item, index) => {
+                      const photo = photos?.find(p => p.id === item.photoId);
+                      return (
+                        <motion.div layout key={index} className="bg-[#FDF8F5]/50 p-6 rounded-[48px] flex gap-8 relative group border-2 border-transparent hover:border-[#A7C080]/20 transition-all">
+                          <div className="w-48 h-48 relative rounded-[40px] overflow-hidden shrink-0 shadow-2xl ring-[12px] ring-white">
+                            <BlobImage blob={photo?.imageUrl} fill className="object-cover" alt="S" />
+                          </div>
+                          <div className="flex-1 space-y-5 pt-3">
+                            <div className="flex justify-between items-center text-[10px] text-gray-300 font-black tracking-widest uppercase">
+                              <span className="bg-white px-4 py-2 rounded-full text-[#A7C080] shadow-sm">SCENE {index + 1}</span>
+                              <span className="flex items-center gap-2"><Clock size={12} /> {item.duration}s</span>
+                            </div>
+                            <textarea value={item.caption} onChange={e => { const n = [...storyboard]; n[index].caption = e.target.value; setStoryboard(n); }} className="w-full p-6 bg-white rounded-[32px] outline-none text-base h-32 resize-none border-2 border-transparent focus:border-[#A7C080]/30 shadow-sm font-medium" placeholder="이 장면에는 어떤 대화가 오갔나요?" />
+                          </div>
+                          <button onClick={() => setStoryboard(prev => prev.filter((_, i) => i !== index))} className="absolute -top-3 -right-3 p-4 bg-white text-gray-300 hover:text-red-400 rounded-full shadow-2xl opacity-0 group-hover:opacity-100 transition-all border-2 border-[#FDF8F5] transform transition hover:scale-110"><Trash2 size={22} /></button>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
                </div>
-               <div className="bg-[#4B4453] p-12 flex flex-col items-center justify-center text-white space-y-10 relative overflow-hidden"><div className="w-full aspect-video bg-black/40 rounded-[40px] shadow-2xl flex items-center justify-center flex-col gap-4 border border-white/5 relative cursor-pointer overflow-hidden"><div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end p-8"><p className="text-xl font-bold opacity-80 italic">미리보기 준비 중</p></div><motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ repeat: Infinity, duration: 4 }} className="bg-white/10 p-10 rounded-full backdrop-blur-md"><Play size={64} fill="currentColor" /></motion.div></div><div className="w-full max-w-sm grid grid-cols-2 gap-4">{['Classic', 'Modern', 'Pop', 'Soft'].map(t => <button key={t} onClick={() => setSelectedTemplate(t.toLowerCase())} className={`py-6 rounded-3xl font-black transition-all ${selectedTemplate === t.toLowerCase() ? 'bg-[#A7C080] text-[#4B4453]' : 'bg-white/5 border border-white/10'}`}>{t}</button>)}</div></div>
+
+               <div className="p-16 flex flex-col items-center justify-center space-y-16 relative overflow-hidden">
+                 <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-[#A7C080]/5 rounded-full blur-[120px] -translate-y-1/2 translate-x-1/2" />
+                 <div className="w-full aspect-video bg-[#4B4453] rounded-[80px] shadow-[0_60px_120px_-30px_rgba(0,0,0,0.5)] flex items-center justify-center flex-col gap-10 relative cursor-pointer group overflow-hidden border-[16px] border-white/10 ring-1 ring-black/20">
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-16 translate-y-6 group-hover:translate-y-0 transition-transform duration-500">
+                      <div className="space-y-3">
+                        <p className="text-3xl font-black text-white">{projectTitle || '우리의 소중한 기록'}</p>
+                        <p className="text-white/50 text-lg font-medium italic">당신의 순간이 따뜻한 영화가 되는 과정</p>
+                      </div>
+                    </div>
+                    <motion.div whileHover={{ scale: 1.15 }} whileTap={{ scale: 0.9 }} className="bg-white/20 p-16 rounded-full backdrop-blur-3xl border border-white/30 shadow-2xl relative z-10 text-white transform transition-all duration-500 hover:shadow-white/20">
+                      <Play size={96} fill="currentColor" />
+                    </motion.div>
+                 </div>
+
+                 <div className="w-full max-w-md grid grid-cols-2 gap-6 relative z-10 px-4">
+                   {['Classic', 'Modern', 'Pop', 'Soft'].map(t => (
+                     <button key={t} onClick={() => setSelectedTemplate(t.toLowerCase())} className={`py-6 rounded-[40px] font-black text-xl transition-all duration-300 ${selectedTemplate === t.toLowerCase() ? 'bg-[#A7C080] text-white shadow-2xl shadow-[#A7C080]/40 -translate-y-2' : 'bg-white text-gray-300 border-2 border-[#F3EDEA] hover:border-[#A7C080]/30 hover:text-[#A7C080]'}`}>
+                       {t}
+                     </button>
+                   ))}
+                 </div>
+               </div>
             </main>
           </motion.div>
         )}
 
         {view === 'video-list' && (
-          <motion.div key="video-list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col p-10 max-w-5xl mx-auto w-full space-y-12">
-            <div className="flex items-center gap-6"><button onClick={() => setView('dashboard')} className="p-4 bg-white rounded-3xl shadow-sm"><ArrowLeft size={24} /></button><h1 className="text-4xl font-black tracking-tight">{activeChild?.name}의 보물 영상</h1></div>
-            {videoProjects.length === 0 ? <div className="flex-1 flex flex-col items-center justify-center text-gray-300 gap-4 opacity-50"><Video size={80} /><p className="font-bold">기록된 비디오가 없습니다.</p></div> : (
-              <div className="grid gap-6">{videoProjects.map(project => (
-                  <motion.div key={project.id} whileHover={{ x: 10 }} className="bg-white p-8 rounded-[48px] shadow-sm flex items-center justify-between group hover:shadow-xl transition-all border border-gray-50">
-                    <div className="flex items-center gap-10"><div className="w-20 h-20 bg-[#FDF8F5] rounded-[30px] flex items-center justify-center text-[#A7C080] shadow-inner"><Video size={40} /></div><div><h3 className="text-2xl font-black mb-1">{project.title}</h3><div className="flex gap-4 text-sm text-gray-300 font-bold"><span><Calendar size={14} /> {new Date(project.createdAt).toLocaleDateString()}</span><span><ImageIcon size={14} /> {project.scenes.length} Scenes</span></div></div></div>
-                    <div className="flex gap-4"><button onClick={() => { setEditingProjectId(project.id!); setProjectTitle(project.title); setStoryboard(project.scenes); setView('video-editor'); }} className="p-5 bg-[#FDF8F5] text-[#A7C080] rounded-[24px] hover:bg-[#A7C080] hover:text-white transition-all"><Edit3 size={24} /></button><button onClick={() => deleteProject(project.id!)} className="p-5 text-gray-100 hover:text-red-400 transition-all"><Trash2 size={24} /></button></div>
+          <motion.div key="video-list" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="flex-1 flex flex-col p-12 max-w-6xl mx-auto w-full space-y-20">
+            <div className="flex items-center gap-10">
+              <button onClick={() => setView('dashboard')} className="p-8 bg-white rounded-[40px] shadow-sm hover:shadow-2xl transition-all hover:scale-105 border-2 border-[#FDF8F5] text-gray-400 hover:text-[#A7C080] active:scale-95"><ArrowLeft size={36} /></button>
+              <div className="space-y-3">
+                <h1 className="text-6xl font-black tracking-tighter text-[#4B4453]">{activeChild?.name}의 영화관</h1>
+                <div className="flex items-center gap-6 text-gray-300 font-black uppercase tracking-widest text-[10px] bg-white px-6 py-3 rounded-full inline-flex shadow-sm">
+                  <Play size={16} fill="currentColor" className="text-[#A7C080]" /> <span>총 {videoProjects.length}편의 기록 상영 중</span>
+                </div>
+              </div>
+            </div>
+
+            {videoProjects.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-gray-200 gap-10 animate-pulse pb-40">
+                <div className="w-80 h-80 bg-white/50 rounded-full flex items-center justify-center shadow-inner ring-[20px] ring-white/30"><Video size={120} strokeWidth={1} /></div>
+                <div className="text-center space-y-4">
+                  <p className="text-3xl font-black tracking-tight text-gray-300">상영관이 아직 조용하네요.</p>
+                  <p className="text-gray-400 font-medium">소중한 사진들을 모아 첫 번째 영화를 만들어 보세요.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="grid gap-10 pb-40">
+                {videoProjects.map(project => (
+                  <motion.div key={project.id} initial={{ x: -20, opacity: 0 }} whileInView={{ x: 0, opacity: 1 }} viewport={{ once: true }} className="bg-white p-12 rounded-[70px] shadow-sm flex items-center justify-between group hover:shadow-[0_40px_80px_-20px_rgba(0,0,0,0.1)] transition-all duration-500 border-4 border-transparent hover:border-[#A7C080]/10">
+                    <div className="flex items-center gap-12">
+                      <div className="w-56 h-32 bg-[#4B4453] rounded-[48px] flex items-center justify-center text-white/20 overflow-hidden relative group-hover:scale-105 transition-transform duration-500 shadow-2xl">
+                        <Play size={48} fill="currentColor" opacity={0.6} className="text-white relative z-10" />
+                        <div className="absolute inset-0 bg-gradient-to-tr from-[#A7C080]/30 to-transparent" />
+                      </div>
+                      <div className="space-y-4">
+                        <h3 className="text-3xl font-black group-hover:text-[#A7C080] transition-colors duration-300">{project.title}</h3>
+                        <div className="flex items-center gap-8 text-[10px] text-gray-400 font-black uppercase tracking-widest bg-[#FDF8F5] px-6 py-3 rounded-full inline-flex border border-gray-100">
+                          <span className="flex items-center gap-3"><Calendar size={14} className="text-[#8E8E8E]" /> {new Date(project.createdAt).toLocaleDateString()}</span>
+                          <span className="flex items-center gap-3"><ImageIcon size={14} className="text-[#8E8E8E]" /> {project.scenes.length} Scenes</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-6">
+                      <button onClick={() => deleteProject(project.id!)} className="p-6 text-gray-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 transform translate-x-4 group-hover:translate-x-0 transition-all duration-500"><Trash2 size={28} /></button>
+                      <button onClick={() => { setEditingProjectId(project.id!); setProjectTitle(project.title); setStoryboard(project.scenes); setView('video-editor'); }} className="p-6 text-gray-200 hover:text-[#A7C080] transition-colors opacity-0 group-hover:opacity-100 transform translate-x-4 group-hover:translate-x-0 transition-all duration-500 delay-75"><Edit3 size={28} /></button>
+                      <button className="bg-[#A7C080]/5 text-[#A7C080] px-12 py-7 rounded-[40px] font-black text-xl hover:bg-[#A7C080] hover:text-white transition-all shadow-sm group-hover:shadow-xl group-hover:-translate-y-1 active:scale-95">상영 하기</button>
+                    </div>
                   </motion.div>
-              ))}</div>
+                ))}
+              </div>
             )}
           </motion.div>
         )}
@@ -440,19 +658,34 @@ export default function App() {
 
       <AnimatePresence>
         {view === 'profiles' && (
-          <div className="fixed inset-0 bg-[#4B4453]/60 backdrop-blur-xl z-[150] flex items-center justify-center p-6">
-             <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white w-full max-w-lg p-12 rounded-[60px] shadow-2xl relative">
-                <button onClick={() => setView('dashboard')} className="absolute top-8 right-8 text-gray-300 hover:text-[#4B4453]"><X size={32} /></button>
-                <div className="mb-12"><h2 className="text-3xl font-black mb-2">누구의 상자를 열까요?</h2><p className="text-gray-400 font-bold">아이들의 소중한 기록을 선택해 보세요.</p></div>
-                <div className="grid grid-cols-2 gap-6 mb-12">{children?.map(child => (
-                    <motion.div key={child.id} layout whileHover={{ scale: 1.05 }} onClick={() => { setActiveChildId(child.id!); setView('dashboard'); }} className={`relative p-8 rounded-[40px] border-4 cursor-pointer text-center transition-all ${activeChildId === child.id ? 'border-[#A7C080] bg-[#A7C080]/5' : 'border-gray-50 bg-gray-50'}`}><div className="w-20 h-20 bg-[#A7C080] rounded-[30px] flex items-center justify-center text-white text-3xl font-black mx-auto mb-4">{child.name[0]}</div><span className="font-black text-xl">{child.name}</span><button onClick={(e) => { e.stopPropagation(); handleDeleteChild(child.id!); }} className="absolute -top-3 -right-3 p-3 bg-white text-gray-200 hover:text-red-400 rounded-full shadow-lg opacity-0"><Trash2 size={20} /></button></motion.div>
-                  ))}<button onClick={() => setShowAddProfileModal(true)} className="flex flex-col items-center justify-center p-8 rounded-[40px] border-4 border-dashed border-gray-100 text-gray-300 hover:border-[#A7C080] hover:text-[#A7C080] transition-all gap-4"><div className="p-4 bg-gray-50 rounded-full"><Plus size={32} /></div><span className="font-bold">추가</span></button></div>
-             </motion.div>
+          <div className="fixed inset-0 bg-[#4B4453]/40 backdrop-blur-2xl z-[300] flex items-center justify-center p-6">
+            <motion.div initial={{ scale: 0.9, y: 50 }} animate={{ scale: 1, y: 0 }} className="bg-white w-full max-w-2xl p-16 rounded-[80px] shadow-[0_60px_120px_-30px_rgba(0,0,0,0.4)] relative space-y-16">
+              <button onClick={() => setView('dashboard')} className="absolute top-12 right-12 text-gray-300 hover:text-gray-600 transition-colors transform hover:rotate-90 duration-300"><X size={40} /></button>
+              <div className="text-center space-y-6">
+                <h2 className="text-5xl font-black tracking-tight text-[#4B4453]">아이의 상자들</h2>
+                <p className="text-lg text-gray-400 font-medium">어떤 아이의 소중한 기록을 확인해볼까요?</p>
+              </div>
+              <div className="grid grid-cols-2 gap-8">
+                {children?.map(child => (
+                   <button key={child.id} onClick={() => { setActiveChildId(child.id!); setView('dashboard'); }} className={`flex flex-col items-center gap-8 p-12 rounded-[60px] border-4 transition-all duration-500 ${activeChildId === child.id ? 'border-[#A7C080] bg-[#A7C080]/5 shadow-2xl scale-105' : 'border-[#FDF8F5] hover:border-[#A7C080]/20 hover:bg-[#FDF8F5]/30'}`}>
+                     <div className="w-32 h-32 bg-white rounded-[40px] flex items-center justify-center shadow-xl overflow-hidden relative ring-[12px] ring-white">
+                       {child.profileImageUrl ? <BlobImage blob={child.profileImageUrl} fill className="object-cover" alt="C" /> : <Baby size={54} className="text-[#A7C080] opacity-40" />}
+                     </div>
+                     <span className="font-black text-2xl text-[#4B4453]">{child.name}</span>
+                   </button>
+                ))}
+                <button onClick={() => { setView('onboarding'); }} className="flex flex-col items-center justify-center gap-8 p-12 rounded-[60px] border-4 border-dashed border-[#F3EDEA] text-gray-300 hover:border-[#A7C080]/30 hover:text-[#A7C080] transition-all bg-[#FDF8F5]/50 group">
+                  <div className="w-32 h-32 rounded-[40px] flex items-center justify-center bg-white shadow-inner group-hover:scale-110 transition-transform duration-300"><Plus size={48} /></div>
+                  <span className="font-black text-2xl uppercase tracking-widest">새 상자</span>
+                </button>
+              </div>
+            </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      <AnimatePresence>{showAddProfileModal && (
+      <AnimatePresence>
+        {showAddProfileModal && (
           <div className="fixed inset-0 z-[200] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6">
             <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white w-full max-w-md p-10 rounded-[50px] shadow-2xl">
               <div className="flex justify-between items-center mb-10"><h3 className="text-2xl font-black">프로필 만들기</h3><button onClick={() => setShowAddProfileModal(false)}><X size={24} /></button></div>
@@ -463,9 +696,11 @@ export default function App() {
               </form>
             </motion.div>
           </div>
-      )}</AnimatePresence>
+        )}
+      </AnimatePresence>
       
-      <AnimatePresence>{isEditPhotoModalOpen && editingPhoto && (
+      <AnimatePresence>
+        {isEditPhotoModalOpen && editingPhoto && (
           <div className="fixed inset-0 bg-[#4B4453]/60 backdrop-blur-md z-[150] flex items-center justify-center p-6">
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white w-full max-w-4xl p-10 rounded-[60px] flex shadow-2xl gap-12 relative overflow-hidden">
               <button onClick={() => setIsEditPhotoModalOpen(false)} className="absolute top-8 right-8 text-gray-300"><X size={32} /></button>
@@ -474,14 +709,15 @@ export default function App() {
                 <div><h3 className="text-3xl font-black mb-2">기록 수정</h3><p className="text-gray-400 font-bold">아이의 추억을 더 정확하게 기록해 주세요.</p></div>
                 <div className="space-y-6">
                    <div><label className="text-[10px] text-gray-400 font-bold ml-2 uppercase">Date Taken</label><input type="date" value={editTakenAt} onChange={e => setEditTakenAt(e.target.value)} className="w-full p-5 bg-gray-50 rounded-[24px] outline-none font-bold shadow-inner" /></div>
-                   <div><label className="text-[10px] text-gray-400 font-bold ml-2 uppercase">Category</label><select value={editCategory} onChange={e => setEditCategory(e.target.value)} className="w-full p-5 bg-gray-50 rounded-[24px] font-bold border-r-8 border-transparent"><option value="영아기">영아기</option><option value="유아기">유아기</option><option value="아동기">아동기</option><option value="기타">기타</option></select></div>
-                   <div><label className="text-[10px] text-gray-400 font-bold ml-2 uppercase">Memory Caption</label><textarea value={editCaption} onChange={e => setEditCaption(e.target.value)} className="w-full p-6 bg-gray-50 rounded-[32px] h-40 outline-none resize-none" placeholder="따뜻한 메모를 남겨주세요." /></div>
+                   <div><label className="text-[10px] text-gray-400 font-black uppercase tracking-widest ml-2">Category</label><select value={editCategory} onChange={e => setEditCategory(e.target.value)} className="w-full p-5 bg-gray-50 rounded-[24px] font-bold border-r-8 border-transparent"><option value="영아기">영아기</option><option value="유아기">유아기</option><option value="아동기">아동기</option><option value="기타">기타</option></select></div>
+                   <div><label className="text-[10px] text-gray-400 font-black uppercase tracking-widest ml-2">Memory Caption</label><textarea value={editCaption} onChange={e => setEditCaption(e.target.value)} className="w-full p-6 bg-gray-50 rounded-[32px] h-40 outline-none resize-none" placeholder="따뜻한 메모를 남겨주세요." /></div>
                 </div>
                 <div className="flex gap-6 pt-4"><button onClick={() => handleDeletePhoto(editingPhoto.id!)} className="p-5 text-gray-200 hover:text-red-400 transition-all"><Trash2 size={24} /></button><button onClick={handleUpdatePhoto} className="flex-1 py-6 bg-[#A7C080] text-white rounded-[24px] font-black shadow-xl transition-all">저장</button></div>
               </div>
             </motion.div>
           </div>
-      )}</AnimatePresence>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
