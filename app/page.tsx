@@ -21,6 +21,26 @@ const VIDEO_TEMPLATES = [
 ];
 
 /**
+ * BlobImage Component: Manages Blob URLs to prevent memory leaks.
+ */
+const BlobImage = ({ blob, ...props }: { blob: Blob | undefined | null } & React.ComponentProps<typeof Image>) => {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!blob) {
+      setUrl(null);
+      return;
+    }
+    const newUrl = URL.createObjectURL(blob);
+    setUrl(newUrl);
+    return () => URL.revokeObjectURL(newUrl);
+  }, [blob]);
+
+  if (!url) return null;
+  return <Image src={url} {...props} />;
+};
+
+/**
  * Main Application Component
  * Implements Multi-Child Profile Management, Smart Photo Upload, Timeline, and Video Engine.
  */
@@ -37,7 +57,8 @@ export default function App() {
     async () => {
       if (!activeChildId) return [];
       const data = await db.photos.where('childIds').equals(activeChildId).toArray();
-      return data.sort((a, b) => b.takenAt - a.takenAt);
+      const sorted = data.sort((a: Photo, b: Photo) => b.takenAt - a.takenAt);
+      return sorted;
     },
     [activeChildId]
   );
@@ -308,6 +329,7 @@ export default function App() {
    */
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
+    console.log(`Files selected: ${files?.length || 0} files`);
     
     // Gracefully handle user cancellation (no files selected)
     if (!files || files.length === 0) {
@@ -316,10 +338,12 @@ export default function App() {
     }
     
     if (!activeChildId) {
-      setError('자녀를 먼저 선택해 주세요.');
+      alert('업로드할 대상을 먼저 선택해 주세요.');
+      e.target.value = '';
       return;
     }
 
+    console.log(`Setting pending files: ${files.length} items`);
     setPendingFiles(files);
     setUploadChildIds([activeChildId]); // Default to currently active child
     setIsUploadModalOpen(true);
@@ -331,12 +355,22 @@ export default function App() {
    */
   const resizeImage = (file: File, maxWidth: number, maxHeight: number): Promise<Blob> => {
     return new Promise((resolve, reject) => {
+      // Check for HEIC/HEIF format (browser support is limited)
+      const fileName = file.name.toLowerCase();
+      if (fileName.endsWith('.heic') || fileName.endsWith('.heif')) {
+        console.error(`HEIC format detected: ${file.name}. This format is not supported by standard browser Image decoder.`);
+        reject(new Error('HEIC/HEIF 형식의 사진입니다. JPG나 PNG로 변환하여 업로드해 주세요. (아이폰 사진 설정 확인 필요)'));
+        return;
+      }
+
+      console.log(`Resizing image: ${file.name} (${Math.round(file.size / 1024)}KB)`);
       const img = new window.Image();
       img.src = URL.createObjectURL(file);
       img.onload = () => {
         URL.revokeObjectURL(img.src);
         let width = img.width;
         let height = img.height;
+        console.log(`Original dimensions: ${width}x${height}`);
 
         if (width > height) {
           if (width > maxWidth) {
@@ -355,19 +389,25 @@ export default function App() {
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
+          console.error('Canvas context not available');
           reject(new Error('Canvas context not available'));
           return;
         }
         ctx.drawImage(img, 0, 0, width, height);
         canvas.toBlob((blob) => {
           if (blob) {
+            console.log(`Resized to: ${width}x${height}, Result size: ${Math.round(blob.size / 1024)}KB`);
             resolve(blob);
           } else {
+            console.error('Canvas toBlob failed');
             reject(new Error('Canvas toBlob failed'));
           }
         }, file.type, 0.8); // 0.8 quality for compression
       };
-      img.onerror = () => reject(new Error('Image load failed'));
+      img.onerror = () => {
+        console.error(`Image load failed: ${file.name}`);
+        reject(new Error('Image load failed'));
+      };
     });
   };
 
@@ -376,13 +416,15 @@ export default function App() {
    * Optimized for bulk upload with resizing and progress tracking.
    */
   const startUpload = async () => {
-    if (!pendingFiles || uploadChildIds.length === 0) {
-      setError('최소 한 명의 자녀를 선택해 주세요.');
+    console.log("startUpload called. Child IDs:", uploadChildIds);
+    if (!pendingFiles || uploadChildIds.length === 0 || !uploadChildIds[0]) {
+      console.warn("Upload aborted: No files or no target child selected.", { filesCount: pendingFiles?.length, uploadChildIds });
+      setError('업로드할 파일을 선택하거나 대상을 지정해 주세요.');
       return;
     }
 
-    // Safe array conversion
-    const files = Array.from(pendingFiles);
+    const files = Array.from(pendingFiles) as File[];
+    console.log("Files to upload (Array):", files.map((f) => ({ name: f.name, size: f.size, type: f.type })));
     
     if (files.length === 0) {
       console.warn("No files in pendingFiles to upload.");
@@ -399,33 +441,50 @@ export default function App() {
 
     try {
       const photoEntries: Photo[] = [];
+      const failedFiles: { name: string; reason: string }[] = [];
 
-      // Process files sequentially to avoid memory issues with many large images
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
+        console.log(`[${i + 1}/${files.length}] Loop Start: ${file.name}`);
         
         try {
-          // 1. Resize and compress image to manage IndexedDB storage
-          // Loosened filtering: allow large images and .heic by using fallback if resizing fails
+          // 0. Type check with fallback
+          const fileType = file.type || '';
+          const isImageMime = fileType.startsWith('image/');
+          const extension = file.name.split('.').pop()?.toLowerCase() || '';
+          const isImageExt = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(extension);
+
+          if (!isImageMime && !isImageExt) {
+            console.warn(`Skipping non-image file: ${file.name} (Type: ${fileType}, Ext: ${extension})`);
+            throw new Error('이미지 파일이 아니거나 지원되지 않는 형식입니다.');
+          }
+
+          // 1. Resize and compress with fallback to original if it fails (but keep HEIC error if that's what resizeImage does)
           let processedBlob: Blob;
           try {
             processedBlob = await resizeImage(file, 1920, 1920);
-          } catch (resizeErr) {
-            console.warn(`Resizing failed for ${file.name} (Type: ${file.type}, Size: ${file.size}). Using original file.`, resizeErr);
-            processedBlob = file; // Fallback to original file if resizing fails (e.g., .heic or unsupported format)
+          } catch (resizeErr: any) {
+            // If it's a critical error like HEIC, rethrow to be caught by the outer file loop
+            if (resizeErr.message.includes('HEIC')) throw resizeErr;
+            
+            console.warn(`Resizing failed for ${file.name}. Using original file.`, resizeErr);
+            processedBlob = file; 
           }
           
           // 2. Extract EXIF data
           let takenAt: number;
           try {
+            console.log(`Extracting EXIF for ${file.name}...`);
             const exif = await exifr.parse(file);
             if (exif && exif.DateTimeOriginal) {
               takenAt = new Date(exif.DateTimeOriginal).getTime();
+              console.log(`EXIF date found: ${new Date(takenAt).toLocaleString()}`);
             } else {
               takenAt = file.lastModified;
+              console.log(`No EXIF date, using lastModified: ${new Date(takenAt).toLocaleString()}`);
             }
           } catch (exifErr) {
-            console.warn(`EXIF extraction failed for ${file.name}:`, exifErr);
+            console.warn(`EXIF parsing failed for ${file.name}, using lastModified:`, exifErr);
             takenAt = file.lastModified;
           }
 
@@ -449,26 +508,42 @@ export default function App() {
             category,
             createdAt: Date.now()
           });
-        } catch (fileErr) {
-          // Log warning for specific file but continue with others
-          console.warn(`File ${file.name} was excluded from upload due to a processing error:`, fileErr);
+        } catch (fileErr: any) {
+          console.error(`Error processing file ${file.name}:`, fileErr);
+          failedFiles.push({ name: file.name, reason: fileErr.message || '처리 오류' });
         }
 
         setUploadProgress(prev => ({ ...prev, current: i + 1 }));
       }
 
+      console.log(`Processing finished. Successful: ${photoEntries.length}, Failed: ${failedFiles.length}`);
+
+      if (failedFiles.length > 0) {
+        const failMessage = failedFiles.map(f => `- ${f.name}: ${f.reason}`).join('\n');
+        alert(`${failedFiles.length}개의 파일 처리에 실패했습니다. 다음 파일을 확인해 주세요:\n${failMessage}`);
+      }
+
       if (photoEntries.length > 0) {
-        // Use bulkAdd for better performance
-        await db.photos.bulkAdd(photoEntries);
-        // alert(`${photoEntries.length}장의 사진이 성공적으로 업로드되었습니다.`);
-      } else {
-        console.warn("All selected files were filtered out or failed to process.");
-        setError('업로드할 수 있는 사진이 없습니다.');
+        try {
+          await db.photos.bulkAdd(photoEntries);
+          console.log("Database save successful!");
+          alert(`${photoEntries.length}장의 사진이 성공적으로 업로드되었습니다.`);
+        } catch (dbErr: any) {
+          console.error("Database BulkAdd Error:", dbErr);
+          if (dbErr.name === 'QuotaExceededError' || dbErr.message?.includes('Quota')) {
+            throw new Error('저장 공간이 부족합니다. 브라우저 저장 용량을 확인하거나 일부 사진을 삭제해 주세요.');
+          } else {
+            throw new Error(`데이터베이스 저장 실패: ${dbErr.message || '알 수 없는 오류'}`);
+          }
+        }
+      } else if (files.length > 0) {
+        const timestamp = new Date().toLocaleTimeString();
+        setError(`업로드할 수 있는 사진이 없습니다. (에러_${timestamp})`);
       }
       
     } catch (err: any) {
-      console.error('Upload Error:', err);
-      setError('사진 업로드 중 오류가 발생했습니다.');
+      console.error('Final Upload Error Handler:', err);
+      setError(err.message || '사진 업로드 중 오류가 발생했습니다.');
     } finally {
       setIsUploading(false);
     }
@@ -859,14 +934,14 @@ export default function App() {
                       className="hidden"
                       checked={uploadChildIds.includes(child.id!)}
                       onChange={() => {
-                        setUploadChildIds(prev => 
-                          prev.includes(child.id!) ? prev.filter(id => id !== child.id) : [...prev, child.id!]
+                        setUploadChildIds((prev: number[]) => 
+                          prev.includes(child.id!) ? prev.filter((id: number) => id !== child.id) : [...prev, child.id!]
                         );
                       }}
                     />
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white overflow-hidden relative ${uploadChildIds.includes(child.id!) ? 'bg-[#A7C080]' : 'bg-[#E5E5E5]'}`}>
                       {child.profileImage ? (
-                        <Image src={URL.createObjectURL(child.profileImage)} fill className="object-cover" alt="Profile" referrerPolicy="no-referrer" />
+                        <BlobImage blob={child.profileImage} fill className="object-cover" alt="Profile" referrerPolicy="no-referrer" />
                       ) : (
                         <Baby size={20} fill="currentColor" />
                       )}
@@ -914,7 +989,7 @@ export default function App() {
               <div className="w-24 h-24 bg-[#A7C080]/10 rounded-full flex items-center justify-center text-[#A7C080] mx-auto mb-8">
                 <Baby size={48} fill="currentColor" />
               </div>
-              <h1 className="text-3xl font-bold mb-2">추억의 보물 상자</h1>
+              <h1 className="text-3xl font-bold mb-2">추억의 보물 상자 <span className="text-xs font-normal text-gray-300">v1.0.1</span></h1>
               <p className="text-[#8E8E8E] mb-10 leading-relaxed">
                 자녀 프로필을 먼저 등록해 주세요.<br />
                 아이의 소중한 순간들을 기록할 준비가 되었습니다.
@@ -927,7 +1002,7 @@ export default function App() {
                     type="text"
                     required
                     value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewName(e.target.value)}
                     className="w-full p-4 bg-[#FDF8F5] rounded-2xl border-2 border-transparent focus:border-[#A7C080]/30 focus:bg-white transition-all outline-none"
                     placeholder="예: 지훈"
                   />
@@ -938,7 +1013,7 @@ export default function App() {
                     type="date"
                     required
                     value={newBirthDate}
-                    onChange={(e) => setNewBirthDate(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewBirthDate(e.target.value)}
                     className="w-full p-4 bg-[#FDF8F5] rounded-2xl border-2 border-transparent focus:border-[#A7C080]/30 focus:bg-white transition-all outline-none"
                   />
                 </div>
@@ -968,7 +1043,7 @@ export default function App() {
                 >
                   <div className="w-10 h-10 bg-[#A7C080] rounded-xl flex items-center justify-center text-white overflow-hidden relative">
                     {activeChild?.profileImage ? (
-                      <Image src={URL.createObjectURL(activeChild.profileImage)} fill className="object-cover" alt="Profile" referrerPolicy="no-referrer" />
+                      <BlobImage blob={activeChild.profileImage} fill className="object-cover" alt="Profile" referrerPolicy="no-referrer" />
                     ) : (
                       <Baby size={20} fill="currentColor" />
                     )}
@@ -1027,7 +1102,7 @@ export default function App() {
                 <div className="space-y-16 pb-32">
                   <div className="flex justify-between items-end">
                     <div>
-                      <h1 className="text-3xl font-black text-[#4B4453]">{activeChild?.name}의 타임라인</h1>
+                      <h1 className="text-3xl font-black text-[#4B4453]">{activeChild?.name}의 타임라인 <span className="text-xs font-normal text-gray-300">v1.0.1</span></h1>
                       <p className="text-[#8E8E8E] mt-1">총 {photos.length}개의 소중한 순간이 담겨 있습니다.</p>
                     </div>
                   </div>
@@ -1054,8 +1129,8 @@ export default function App() {
                             className={`group relative bg-white rounded-[32px] overflow-hidden shadow-sm hover:shadow-xl transition-all border-4 cursor-pointer ${selectedPhotoIds.includes(photo.id!) ? 'border-[#A7C080]' : 'border-transparent'}`}
                           >
                             <div className="aspect-square relative">
-                              <Image 
-                                src={URL.createObjectURL(photo.blob)} 
+                              <BlobImage 
+                                blob={photo.blob} 
                                 fill 
                                 className="object-cover transition-transform duration-500 group-hover:scale-110" 
                                 alt={photo.fileName} 
@@ -1169,7 +1244,7 @@ export default function App() {
                 <input 
                   type="text" 
                   value={projectTitle}
-                  onChange={(e) => setProjectTitle(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProjectTitle(e.target.value)}
                   className="text-xl font-black text-[#4B4453] outline-none border-b-2 border-transparent focus:border-[#A7C080] transition-all"
                   placeholder="프로젝트 제목"
                 />
@@ -1179,7 +1254,7 @@ export default function App() {
                   <Layout size={18} className="text-[#A7C080]" />
                   <select 
                     value={selectedTemplate}
-                    onChange={(e) => setSelectedTemplate(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSelectedTemplate(e.target.value)}
                     className="bg-transparent font-bold text-sm outline-none text-[#4B4453]"
                   >
                     {VIDEO_TEMPLATES.map(t => (
@@ -1191,7 +1266,7 @@ export default function App() {
                   <Music size={18} className="text-[#A7C080]" />
                   <select 
                     value={selectedBgm}
-                    onChange={(e) => setSelectedBgm(e.target.value)}
+                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSelectedBgm(e.target.value)}
                     className="bg-transparent font-bold text-sm outline-none text-[#4B4453]"
                   >
                     <option value="BGM_1">BGM 1 (잔잔한)</option>
@@ -1245,7 +1320,7 @@ export default function App() {
                           {index + 1}
                         </div>
                         <div className="w-32 h-32 relative rounded-2xl overflow-hidden shrink-0">
-                          <Image src={URL.createObjectURL(photo.blob)} fill className="object-cover" alt="Scene" referrerPolicy="no-referrer" />
+                          <BlobImage blob={photo.blob} fill className="object-cover" alt="Scene" referrerPolicy="no-referrer" />
                           <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 rounded-lg text-[10px] font-black text-[#A7C080]">
                             {formatAge(photo.ageInMonths)}
                           </div>
@@ -1359,7 +1434,9 @@ export default function App() {
                         <Edit3 size={20} /> 편집하기
                       </button>
                       <button 
-                        onClick={() => deleteProject(project.id!)}
+                        onClick={() => {
+                          if (project.id) deleteProject(project.id);
+                        }}
                         className="p-4 text-[#E5E5E5] hover:text-red-400 transition-colors"
                       >
                         <Trash2 size={24} />
@@ -1403,7 +1480,7 @@ export default function App() {
                   >
                     <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white overflow-hidden relative ${activeChildId === child.id ? 'bg-[#A7C080]' : 'bg-[#E5E5E5]'}`}>
                       {child.profileImage ? (
-                        <Image src={URL.createObjectURL(child.profileImage)} fill className="object-cover" alt="Profile" referrerPolicy="no-referrer" />
+                        <BlobImage blob={child.profileImage} fill className="object-cover" alt="Profile" referrerPolicy="no-referrer" />
                       ) : (
                         <Baby size={28} fill="currentColor" />
                       )}
@@ -1453,7 +1530,7 @@ export default function App() {
                       <label className="relative block w-24 h-24 mx-auto cursor-pointer group">
                         <div className="w-full h-full bg-[#FDF8F5] rounded-3xl flex items-center justify-center text-[#8E8E8E] overflow-hidden border-2 border-dashed border-[#A7C080]/20 group-hover:border-[#A7C080]/50 transition-all">
                           {newProfileImage ? (
-                            <Image src={URL.createObjectURL(newProfileImage)} fill className="object-cover" alt="Profile" referrerPolicy="no-referrer" />
+                            <BlobImage blob={newProfileImage} fill className="object-cover" alt="Profile" referrerPolicy="no-referrer" />
                           ) : (
                             <div className="flex flex-col items-center gap-1">
                               <Camera size={24} />
@@ -1517,8 +1594,8 @@ export default function App() {
               className="bg-white w-full max-w-xl p-8 rounded-[40px] shadow-2xl border border-[#A7C080]/10 flex flex-col md:flex-row gap-8"
             >
               <div className="w-full md:w-1/2 aspect-square relative rounded-3xl overflow-hidden shrink-0 shadow-inner">
-                <Image 
-                  src={URL.createObjectURL(editingPhoto.blob)} 
+                <BlobImage 
+                  blob={editingPhoto.blob} 
                   fill 
                   className="object-cover" 
                   alt="Editing" 
