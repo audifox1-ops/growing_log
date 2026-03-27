@@ -58,26 +58,32 @@ export interface VideoProject {
   updatedAt: number;
 }
 
-// Collections Refs
-const childrenRef = collection(db, "children");
-const photosRef = collection(db, "photos");
-const projectsRef = collection(db, "videoProjects");
+// Helper to get collection refs safely (Lazy Loading to prevent build-time crashes)
+const getCol = (name: string) => {
+  if (!db) return null;
+  return collection(db, name);
+};
 
 export const firebaseService = {
-  // ... (existing addChild, deleteChild)
+  // --- Children ---
   async addChild(child: Omit<Child, 'id'>) {
-    return await addDoc(childrenRef, {
+    const col = getCol("children");
+    if (!col) throw new Error("Firebase not initialized");
+    return await addDoc(col, {
       ...child,
       createdAt: Date.now()
     });
   },
 
   async deleteChild(id: string) {
+    if (!db) throw new Error("Firebase not initialized");
     await deleteDoc(doc(db, "children", id));
   },
 
   // --- Photos & Storage ---
   async uploadPhoto(file: Blob, metadata: Omit<Photo, 'id' | 'imageUrl' | 'storagePath'>) {
+    if (!storage || !db) throw new Error("Firebase not initialized");
+    
     const filename = `${Date.now()}_${metadata.fileName}`;
     const storagePath = `photos/${metadata.childIds[0]}/${filename}`;
     const fileRef = ref(storage, storagePath);
@@ -87,7 +93,9 @@ export const firebaseService = {
     const imageUrl = await getDownloadURL(fileRef);
 
     // 2. Save Metadata to Firestore
-    const docRef = await addDoc(photosRef, {
+    const col = getCol("photos");
+    if (!col) throw new Error("Firebase not initialized");
+    const docRef = await addDoc(col, {
       ...metadata,
       imageUrl,
       storagePath,
@@ -98,6 +106,8 @@ export const firebaseService = {
   },
 
   async deletePhoto(photoId: string, storagePath: string) {
+    if (!storage || !db) throw new Error("Firebase not initialized");
+    
     // 1. Delete from Storage
     const fileRef = ref(storage, storagePath);
     await deleteObject(fileRef).catch(console.error);
@@ -107,19 +117,23 @@ export const firebaseService = {
   },
 
   async updatePhoto(photoId: string, data: Partial<Photo>) {
+    if (!db) throw new Error("Firebase not initialized");
     const photoDoc = doc(db, "photos", photoId);
     await updateDoc(photoDoc, data);
   },
 
   // --- Video Projects ---
   async saveVideoProject(project: Omit<VideoProject, 'id'>) {
-    return await addDoc(projectsRef, {
+    const col = getCol("videoProjects");
+    if (!col) throw new Error("Firebase not initialized");
+    return await addDoc(col, {
       ...project,
       updatedAt: Date.now()
     });
   },
 
   async updateVideoProject(projectId: string, data: Partial<VideoProject>) {
+    if (!db) throw new Error("Firebase not initialized");
     const projectDoc = doc(db, "videoProjects", projectId);
     await updateDoc(projectDoc, {
       ...data,
@@ -128,12 +142,16 @@ export const firebaseService = {
   },
 
   async deleteVideoProject(projectId: string) {
+    if (!db) throw new Error("Firebase not initialized");
     await deleteDoc(doc(db, "videoProjects", projectId));
   },
 
   // --- Real-time Subscriptions ---
   subscribeChildren(callback: (data: Child[]) => void) {
-    const q = query(childrenRef, orderBy("createdAt", "desc"));
+    const col = getCol("children");
+    if (!col) return () => {}; // No-op during build/server-side
+    
+    const q = query(col, orderBy("createdAt", "desc"));
     return onSnapshot(q, 
       (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Child));
@@ -146,8 +164,11 @@ export const firebaseService = {
   },
 
   subscribePhotos(childId: string, callback: (data: Photo[]) => void) {
+    const col = getCol("photos");
+    if (!col) return () => {};
+    
     const q = query(
-      photosRef, 
+      col, 
       where("childIds", "array-contains", childId),
       orderBy("takenAt", "desc")
     );
@@ -163,8 +184,11 @@ export const firebaseService = {
   },
 
   subscribeVideoProjects(childId: string, callback: (data: VideoProject[]) => void) {
+    const col = getCol("videoProjects");
+    if (!col) return () => {};
+    
     const q = query(
-      projectsRef,
+      col,
       where("childId", "==", childId),
       orderBy("updatedAt", "desc")
     );
