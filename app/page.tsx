@@ -296,7 +296,16 @@ export default function App() {
    * Processes the actual upload after children are selected.
    */
   const startUpload = async () => {
-    if (!pendingFiles || uploadChildIds.length === 0) return;
+    console.log("startUpload triggered", { pendingFilesCount: pendingFiles?.length, uploadChildIds });
+    if (!pendingFiles || uploadChildIds.length === 0) {
+      console.warn("Upload aborted: No files or no children selected.");
+      return;
+    }
+
+    if (!activeChild) {
+      setError("선택된 자녀 프로필이 없습니다.");
+      return;
+    }
     
     setIsUploadModalOpen(false);
     setIsUploading(true);
@@ -305,6 +314,7 @@ export default function App() {
     try {
       for (let i = 0; i < pendingFiles.length; i++) {
         const file = pendingFiles[i];
+        console.log(`Processing file ${i + 1}/${pendingFiles.length}: ${file.name}`);
         
         // --- Smart Metadata Extraction (exifr) ---
         let takenAt = file.lastModified;
@@ -312,12 +322,13 @@ export default function App() {
           const exif = await exifr.parse(file);
           if (exif?.DateTimeOriginal) {
             takenAt = new Date(exif.DateTimeOriginal).getTime();
+            console.log(`EXIF date found: ${new Date(takenAt).toISOString()}`);
           }
         } catch (e) {
           console.warn("EXIF extraction failed for", file.name, e);
         }
 
-        const ageInMonths = calculateAgeInMonths(activeChild!.birthDate, takenAt);
+        const ageInMonths = calculateAgeInMonths(activeChild.birthDate, takenAt);
         
         let category = "기타";
         if (ageInMonths <= 12) category = "영아기";
@@ -325,6 +336,7 @@ export default function App() {
         else category = "아동기";
 
         // --- Firebase Upload ---
+        console.log(`Starting Firebase upload for: ${file.name}`);
         await firebaseService.uploadPhoto(file, {
           childIds: uploadChildIds,
           fileName: file.name,
@@ -335,11 +347,13 @@ export default function App() {
           category,
           createdAt: Date.now()
         });
+        console.log(`Successfully uploaded: ${file.name}`);
 
         setUploadProgress(prev => ({ ...prev, current: i + 1 }));
       }
       alert(`${pendingFiles.length}장의 사진이 성공적으로 업로드되었습니다.`);
     } catch (err: any) {
+      console.error("Upload process failed:", err);
       setError('업로드 중 오류 발생: ' + err.message);
     } finally {
       setIsUploading(false);

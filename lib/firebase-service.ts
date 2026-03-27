@@ -87,12 +87,14 @@ export const firebaseService = {
     const imageUrl = await getDownloadURL(fileRef);
 
     // 2. Save Metadata to Firestore
-    return await addDoc(photosRef, {
+    const docRef = await addDoc(photosRef, {
       ...metadata,
       imageUrl,
       storagePath,
       createdAt: Date.now()
     });
+    console.log(`Photo metadata saved to Firestore with ID: ${docRef.id}`);
+    return docRef;
   },
 
   async deletePhoto(photoId: string, storagePath: string) {
@@ -132,10 +134,15 @@ export const firebaseService = {
   // --- Real-time Subscriptions ---
   subscribeChildren(callback: (data: Child[]) => void) {
     const q = query(childrenRef, orderBy("createdAt", "desc"));
-    return onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Child));
-      callback(data);
-    });
+    return onSnapshot(q, 
+      (snapshot) => {
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Child));
+        callback(data);
+      },
+      (error) => {
+        console.error("Children Subscription Error:", error);
+      }
+    );
   },
 
   subscribePhotos(childId: string, callback: (data: Photo[]) => void) {
@@ -144,10 +151,15 @@ export const firebaseService = {
       where("childIds", "array-contains", childId),
       orderBy("takenAt", "desc")
     );
-    return onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Photo));
-      callback(data);
-    });
+    return onSnapshot(q, 
+      (snapshot) => {
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Photo));
+        callback(data);
+      },
+      (error) => {
+        console.error("Photos Subscription Error (Missing Index or Permission):", error);
+      }
+    );
   },
 
   subscribeVideoProjects(childId: string, callback: (data: VideoProject[]) => void) {
@@ -156,9 +168,14 @@ export const firebaseService = {
       where("childId", "==", childId),
       orderBy("updatedAt", "desc")
     );
-    return onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as VideoProject));
-      callback(data);
-    });
+    return onSnapshot(q, 
+      (snapshot) => {
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as VideoProject));
+        callback(data);
+      },
+      (error) => {
+        console.error("VideoProjects Subscription Error:", error);
+      }
+    );
   }
 };

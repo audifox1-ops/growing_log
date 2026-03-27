@@ -40,87 +40,39 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
-    function isAuthenticated() {
-      return request.auth != null;
+    // Helper: Always allow for Personal Edition (No-auth)
+    function isOpen() {
+      return true;
     }
 
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
-    function isDocOwner() {
-      return isAuthenticated() && request.auth.uid == resource.data.userId;
-    }
-
-    function isValidEmail(email) {
-      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
-    }
-
-    function isValidUrl(url) {
-      return url is string && (url.matches("^https://.*") || url.matches("^http://.*"));
-    }
-
-    // ===============================================================
-    // Domain Validators
-    // ===============================================================
-    function isValidUser(data) {
-      return data.keys().hasAll(['email', 'name', 'createdAt']) &&
-             isValidEmail(data.email) &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100;
-    }
-
+    // Domain Validators (Simplified for MVP)
     function isValidChild(data) {
-      return data.keys().hasAll(['userId', 'name', 'birthDate']) &&
-             data.userId == request.auth.uid &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100;
+      return data.keys().hasAll(['name', 'birthDate']);
     }
 
     function isValidPhoto(data) {
-      return data.keys().hasAll(['childId', 'url', 'dateTaken']) &&
-             isValidUrl(data.url);
+      return data.keys().hasAll(['childIds', 'imageUrl', 'takenAt']);
     }
 
     function isValidVideo(data) {
-      return data.keys().hasAll(['childId', 'videoUrl', 'createdAt']) &&
-             isValidUrl(data.videoUrl);
+      return data.keys().hasAll(['childId', 'title', 'scenes']);
     }
 
-    // ===============================================================
     // Rules
-    // ===============================================================
-
     match /users/{userId} {
-      allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidUser(request.resource.data);
-      allow update: if isOwner(userId) && isValidUser(request.resource.data) &&
-                      request.resource.data.createdAt == resource.data.createdAt;
+      allow read, write: if isOpen();
     }
 
     match /children/{childId} {
-      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
-      allow create: if isAuthenticated() && isValidChild(request.resource.data);
-      allow update: if isAuthenticated() && isDocOwner() && isValidChild(request.resource.data) &&
-                      request.resource.data.userId == resource.data.userId;
-      allow delete: if isAuthenticated() && isDocOwner();
+      allow read, write: if isOpen();
     }
 
     match /photos/{photoId} {
-      // For MVP, we assume child ownership check is handled by app logic or more complex rules
-      // Here we simplify to auth check for brevity, but ideally we'd check if child belongs to user
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidPhoto(request.resource.data);
-      allow update: if isAuthenticated() && isValidPhoto(request.resource.data);
-      allow delete: if isAuthenticated();
+      allow read, write: if isOpen();
     }
 
-    match /videos/{videoId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidVideo(request.resource.data);
-      allow update: if isAuthenticated() && isValidVideo(request.resource.data);
-      allow delete: if isAuthenticated();
+    match /videoProjects/{projectId} {
+      allow read, write: if isOpen();
     }
   }
 }
