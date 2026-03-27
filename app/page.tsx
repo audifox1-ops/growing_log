@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Baby, Plus, Trash2, Users, ChevronRight, X, Camera, Loader2, AlertCircle, Check, Video, Upload, Calendar, Clock, Image as ImageIcon, ChevronUp, ChevronDown, Save, Play, Music, Edit3, List, ArrowLeft, Sparkles, Layout, RefreshCw, LogOut, LogIn
+  Baby, Plus, Trash2, Users, ChevronRight, X, Camera, Loader2, AlertCircle, Check, Video, Upload, Calendar, Clock, Image as ImageIcon, ChevronUp, ChevronDown, Save, Play, Music, Edit3, List, ArrowLeft, Sparkles, Layout, RefreshCw, LogOut, LogIn, User as UserIcon
 } from 'lucide-react';
 import exifr from 'exifr';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -63,6 +63,7 @@ export default function App() {
   // --- Auth & Profile State ---
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [profileImgError, setProfileImgError] = useState(false);
 
   // --- Global State (Zustand) ---
   const { activeChildId, setActiveChildId } = useChildStore();
@@ -110,7 +111,6 @@ export default function App() {
       return;
     }
 
-    // 1. Handle Redirect Result (COOP Error Fix)
     const checkRedirectResult = async () => {
       try {
         const result = await getRedirectResult(auth);
@@ -129,18 +129,19 @@ export default function App() {
 
     checkRedirectResult();
 
-    // 2. Auth State Listener
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setAuthLoading(false);
       setMounted(true);
       setIsLoading(false);
+      // Reset profile image error state when user changes
+      setProfileImgError(false);
     });
 
     return () => unsubscribe();
   }, []);
 
-  // --- Real-time Subscriptions (Authenticated & Sub-collection Based) ---
+  // --- Real-time Subscriptions ---
   
   useEffect(() => {
     if (!user) {
@@ -197,7 +198,6 @@ export default function App() {
     return groups;
   }, [photos]);
 
-  // Handle Initial View
   useEffect(() => {
     if (!mounted || !user || children === undefined) return;
     if (children.length === 0) {
@@ -207,12 +207,11 @@ export default function App() {
     }
   }, [mounted, user, children, activeChildId, setActiveChildId]);
 
-  // --- Authentication Handlers (COOP Fix: Using Redirect) ---
+  // --- Handlers ---
 
   const handleLogin = async () => {
     try {
       setIsLoading(true);
-      // signInWithPopup 대신 signInWithRedirect 사용
       await signInWithRedirect(auth, googleProvider);
     } catch (err: any) {
       setError('로그인 시도 중 오류가 발생했습니다: ' + err.message);
@@ -230,8 +229,6 @@ export default function App() {
       setError('로그아웃 중 오류가 발생했습니다.');
     }
   };
-
-  // --- CRUD Handlers ---
 
   const handleAddChild = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -266,8 +263,6 @@ export default function App() {
     }
   };
 
-  // --- Advanced Upload with Promise.all & Progress Tracking ---
-
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -296,7 +291,6 @@ export default function App() {
     setUploadProgress({ current: 0, total: pendingFiles.length });
 
     try {
-      // Parallel upload with Promise.all
       const uploadTasks = pendingFiles.map(async (file) => {
         let takenAt = file.lastModified;
         try {
@@ -319,7 +313,6 @@ export default function App() {
           category,
         });
 
-        // Update progress count
         setUploadProgress(prev => ({ ...prev, current: prev.current + 1 }));
         return result;
       });
@@ -335,8 +328,6 @@ export default function App() {
       setUploadChildIds([]);
     }
   };
-
-  // --- Photo Interaction Handlers ---
 
   const togglePhotoSelection = (id: string) => {
     setSelectedPhotoIds(prev =>
@@ -397,8 +388,6 @@ export default function App() {
       setError('수정 실패: ' + err.message);
     }
   };
-
-  // --- Video Project Handlers ---
 
   const saveVideoProject = async () => {
     if (!user || !activeChildId) return;
@@ -479,7 +468,6 @@ export default function App() {
         contents: [{ parts: [{ text: `아이 이름: ${activeChild.name}` }, ...photoParts.flat()] }]
       });
 
-      // Vercel build fix: handle undefined response.text
       const captions = JSON.parse(response.text || "[]");
       if (Array.isArray(captions)) {
         setStoryboard(prev => prev.map((item, index) => ({
@@ -495,7 +483,7 @@ export default function App() {
     }
   };
 
-  // --- Sub-Components ---
+  // --- Views ---
 
   const LoginView = () => (
     <div className="min-h-screen flex items-center justify-center bg-[#FDF8F5] p-6">
@@ -533,7 +521,7 @@ export default function App() {
     </div>
   );
 
-  // --- Main Render Lifecycle ---
+  // --- Main Render ---
 
   if (!mounted || authLoading) {
     return (
@@ -550,7 +538,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FDF8F5] text-[#4B4453]">
-      {/* Network / General Error Pop */}
       <AnimatePresence>
         {error && (
           <motion.div 
@@ -564,7 +551,6 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Concurrent Upload Progress Overlay */}
       <AnimatePresence>
         {isUploading && (
           <div className="fixed inset-0 z-[100] bg-[#4B4453]/60 backdrop-blur-md flex items-center justify-center p-6">
@@ -592,7 +578,6 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Upload Confirmation Modal */}
       <AnimatePresence>
         {isUploadModalOpen && (
           <div className="fixed inset-0 bg-[#4B4453]/40 backdrop-blur-sm z-[110] flex items-center justify-center p-6">
@@ -618,7 +603,6 @@ export default function App() {
       </AnimatePresence>
 
       <AnimatePresence mode="wait">
-        {/* Onboarding View */}
         {view === 'onboarding' && (
           <motion.div key="onboarding" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex items-center justify-center p-6">
             <div className="max-w-md w-full bg-white p-12 rounded-[50px] shadow-2xl text-center space-y-8">
@@ -633,7 +617,6 @@ export default function App() {
           </motion.div>
         )}
 
-        {/* Dashboard View */}
         {view === 'dashboard' && (
           <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col">
             <header className="bg-white border-b border-[#A7C080]/10 sticky top-0 z-30 p-4 shadow-sm backdrop-blur-md bg-white/80">
@@ -646,15 +629,18 @@ export default function App() {
                 </button>
                 <div className="flex items-center gap-4">
                   <div className="sm:flex items-center gap-3 mr-4 bg-gray-50 p-2 rounded-2xl pr-4 border border-gray-100 hidden">
-                    <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-white shadow-sm relative">
-                      {user.photoURL ? (
-                        <Image 
+                    <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-white shadow-sm relative flex items-center justify-center bg-gray-100">
+                      {user.photoURL && !profileImgError ? (
+                        /* Use standard img tag for external profile photos to avoid Next.js Image optimization 400 errors */
+                        <img 
                           src={user.photoURL} 
                           width={32} height={32} alt="U" 
-                          onError={(e) => { (e.target as any).src = 'https://www.gstatic.com/images/branding/product/1x/avatar_circle_blue_512dp.png'; }}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover"
+                          onError={() => setProfileImgError(true)}
                         />
                       ) : (
-                        <div className="w-full h-full bg-gray-200 flex items-center justify-center text-gray-400"><Users size={16} /></div>
+                        <div className="w-full h-full flex items-center justify-center text-gray-400"><UserIcon size={16} /></div>
                       )}
                     </div>
                     <span className="text-sm font-bold truncate max-w-[100px]">{user.displayName}</span>
@@ -703,7 +689,6 @@ export default function App() {
               )}
             </main>
 
-            {/* Float Action: Create Video */}
             <AnimatePresence>
               {selectedPhotoIds.length > 0 && (
                 <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="fixed bottom-10 left-1/2 -translate-x-1/2 z-40 w-full max-w-sm px-6">
@@ -720,7 +705,6 @@ export default function App() {
           </motion.div>
         )}
 
-        {/* Video Editor View */}
         {view === 'video-editor' && (
           <motion.div key="video-editor" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col bg-white">
             <header className="p-6 border-b flex justify-between items-center sticky top-0 bg-white z-40">
@@ -768,7 +752,6 @@ export default function App() {
           </motion.div>
         )}
 
-        {/* Video Library View */}
         {view === 'video-list' && (
           <motion.div key="video-list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col p-10 max-w-5xl mx-auto w-full space-y-12">
             <div className="flex items-center gap-6">
@@ -800,11 +783,10 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Profile Switching / Management */}
       <AnimatePresence>
         {view === 'profiles' && (
           <div className="fixed inset-0 bg-[#4B4453]/60 backdrop-blur-xl z-[150] flex items-center justify-center p-6">
-             <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white w-full max-w-lg p-12 rounded-[60px] shadow-2xl relative border border-white/20">
+             <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white w-full max-lg p-12 rounded-[60px] shadow-2xl relative border border-white/20">
                 <button onClick={() => setView('dashboard')} className="absolute top-8 right-8 text-gray-300 hover:text-[#4B4453] transition-colors"><X size={32} /></button>
                 <div className="mb-12"><h2 className="text-3xl font-black mb-2">누구의 상자를 열까요?</h2><p className="text-gray-400 font-bold">아이들의 소중한 기록을 선택해 보세요.</p></div>
                 <div className="grid grid-cols-2 gap-6 mb-12">
@@ -828,7 +810,6 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Form: Add New Child Profile */}
       <AnimatePresence>
         {showAddProfileModal && (
           <div className="fixed inset-0 z-[200] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6">
@@ -847,7 +828,6 @@ export default function App() {
         )}
       </AnimatePresence>
       
-      {/* Modal: Edit Photo Metadata */}
       <AnimatePresence>
         {isEditPhotoModalOpen && editingPhoto && (
           <div className="fixed inset-0 bg-[#4B4453]/60 backdrop-blur-md z-[150] flex items-center justify-center p-6">
