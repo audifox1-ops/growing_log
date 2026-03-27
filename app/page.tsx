@@ -117,7 +117,7 @@ export default function App() {
 
   // --- Multi-Child Upload State ---
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [pendingFiles, setPendingFiles] = useState<FileList | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
   const [uploadChildIds, setUploadChildIds] = useState<string[]>([]);
 
   // --- Video Editor State ---
@@ -224,8 +224,11 @@ export default function App() {
       return;
     }
 
-    console.log(`Setting pending files: ${files.length} items`);
-    setPendingFiles(files);
+    // Convert FileList to stable File array to prevent data loss
+    const fileArray = Array.from(files);
+    console.log(`Setting pending files: ${fileArray.length} items as Array`);
+    
+    setPendingFiles(fileArray);
     setUploadChildIds([activeChildId]); // Default to currently active child
     setIsUploadModalOpen(true);
     e.target.value = ''; // Reset input to allow selecting the same file again
@@ -296,9 +299,21 @@ export default function App() {
    * Processes the actual upload after children are selected.
    */
   const startUpload = async () => {
-    console.log("startUpload triggered", { pendingFilesCount: pendingFiles?.length, uploadChildIds });
-    if (!pendingFiles || uploadChildIds.length === 0) {
-      console.warn("Upload aborted: No files or no children selected.");
+    console.log("startUpload triggered", { 
+      pendingFilesStatus: !!pendingFiles, 
+      pendingFilesCount: pendingFiles?.length, 
+      uploadChildIds 
+    });
+
+    if (!pendingFiles || pendingFiles.length === 0) {
+      console.warn("Upload aborted: No files selected.");
+      alert("업로드할 파일을 찾을 수 없습니다. 다시 선택해 주세요.");
+      return;
+    }
+
+    if (uploadChildIds.length === 0) {
+      console.warn("Upload aborted: No children selected.");
+      alert("사진을 등록할 자녀를 선택해 주세요.");
       return;
     }
 

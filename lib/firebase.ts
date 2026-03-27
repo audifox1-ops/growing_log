@@ -12,10 +12,22 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
 };
 
-// Initialize Firebase
+const isConfigValid = !!firebaseConfig.apiKey;
+
+// Initialize Firebase only if config is valid or during client-side execution with env vars
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const storage = getStorage(app);
+
+// Initialize services with safety checks for build-time (SSR/Prerendering)
+let auth: any;
+let db: any;
+let storage: any;
+
+if (isConfigValid) {
+  auth = getAuth(app);
+  db = getFirestore(app);
+  storage = getStorage(app);
+} else {
+  console.warn("Firebase configuration is missing. This might be normal during build-time (prerendering).");
+}
 
 export { app, auth, db, storage };
