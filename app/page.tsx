@@ -50,7 +50,10 @@ const BlobImage = ({ blob, alt, ...props }: any) => {
     <Image 
       src={url} 
       alt={alt || "이미지"}
-      onError={() => setHasError(true)}
+      onError={() => {
+        console.error("--- [Error] 이미지 로드 실패 ---", url);
+        setHasError(true);
+      }}
       {...props} 
     />
   );
@@ -107,22 +110,24 @@ export default function App() {
   // --- Firebase Auth & Redirect Result Listener ---
   useEffect(() => {
     if (!auth) {
+      console.warn("--- [Debug] 파이어베이스 인증 객체 없음 ---");
       setAuthLoading(false);
       return;
     }
 
     const checkRedirectResult = async () => {
       try {
+        console.log("--- [Debug] 리다이렉트 결과 확인 중 ---");
         const result = await getRedirectResult(auth);
         if (result?.user) {
-          console.log("로그인 성공 (리다이렉트):", result.user.displayName);
+          console.log("--- [Debug] 로그인 성공 (리다이렉트):", result.user.displayName);
         }
       } catch (err: any) {
+        console.error("--- [Error] 리다이렉트 인증 에러 발생 ---", err);
         if (err.code === 'auth/cross-origin-opener-policy-blocked') {
-          console.warn("COOP blocked redirect, but continuing with state listener.");
+          console.warn("--- [Debug] COOP 정책에 의해 차단되었으나, 상태 리스너가 후속 처리합니다 ---");
         } else {
-          console.error("Redirect Auth Error:", err);
-          setError("로그인 처리 중 오류가 발생했습니다.");
+          setError("로그인 처리 중 오류가 발생했습니다: " + err.message);
         }
       }
     };
@@ -130,11 +135,11 @@ export default function App() {
     checkRedirectResult();
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      console.log("--- [Debug] 인증 상태 변경 감지됨:", currentUser?.displayName || "비로그인");
       setUser(currentUser);
       setAuthLoading(false);
       setMounted(true);
-      setIsLoading(false);
-      // Reset profile image error state when user changes
+      setIsLoading(false); // 리다이렉트 완료 후 또는 상태 확인 후 로딩 해제
       setProfileImgError(false);
     });
 
@@ -148,6 +153,7 @@ export default function App() {
       setChildren([]);
       return;
     }
+    console.log("--- [Debug] 자녀 데이터 구독 시작 ---");
     const unsubscribe = firebaseService.subscribeChildren(user.uid, (data) => {
       setChildren(data);
     });
@@ -159,6 +165,7 @@ export default function App() {
       setPhotos([]);
       return;
     }
+    console.log("--- [Debug] 사진 데이터 구독 시작 (ChildID):", activeChildId);
     const unsubscribe = firebaseService.subscribePhotos(user.uid, activeChildId, (data) => {
       setPhotos(data);
     });
@@ -170,6 +177,7 @@ export default function App() {
       setVideoProjects([]);
       return;
     }
+    console.log("--- [Debug] 비디오 프로젝트 구독 시작 ---");
     const unsubscribe = firebaseService.subscribeVideoProjects(user.uid, activeChildId, (data) => {
       setVideoProjects(data);
     });
@@ -210,12 +218,19 @@ export default function App() {
   // --- Handlers ---
 
   const handleLogin = async () => {
+    console.log("--- [Debug] 상자 열기 버튼 클릭됨 ---");
     try {
       setIsLoading(true);
+      console.log("--- [Debug] 리다이렉트 로그인 시도 (auth, provider):", !!auth, !!googleProvider);
       await signInWithRedirect(auth, googleProvider);
     } catch (err: any) {
+      console.error("--- [Error] 로그인 에러 발생 ---", err);
       setError('로그인 시도 중 오류가 발생했습니다: ' + err.message);
+    } finally {
+      // 리다이렉트 방식의 경우 즉시 페이지가 이동하므로 이곳이 실행되지 않을 수 있으나,
+      // 에러 발생 등으로 멈췄을 때 로딩을 해제하는 안전장치입니다.
       setIsLoading(false);
+      console.log("--- [Debug] 로그인 핸들러 완료 ---");
     }
   };
 
@@ -226,6 +241,7 @@ export default function App() {
       setView('dashboard');
       setActiveChildId(null);
     } catch (err: any) {
+      console.error("--- [Error] 로그아웃 에러 발생 ---", err);
       setError('로그아웃 중 오류가 발생했습니다.');
     }
   };
@@ -247,6 +263,7 @@ export default function App() {
       setShowAddProfileModal(false);
       if (view === 'onboarding') setView('dashboard');
     } catch (err: any) {
+      console.error("--- [Error] 자녀 추가 실패 ---", err);
       setError('아이 추가 실패: ' + err.message);
     } finally {
       setIsLoading(false);
@@ -259,6 +276,7 @@ export default function App() {
       await firebaseService.deleteChild(user.uid, id);
       if (activeChildId === id) setActiveChildId(null);
     } catch (err: any) {
+      console.error("--- [Error] 자녀 삭제 실패 ---", err);
       setError('삭제 실패: ' + err.message);
     }
   };
@@ -320,7 +338,7 @@ export default function App() {
       await Promise.all(uploadTasks);
       alert(`${pendingFiles.length}장의 사진이 안전하게 클라우드에 저장되었습니다.`);
     } catch (err: any) {
-      console.error("Upload process failed:", err);
+      console.error("--- [Error] 업로드 실패 ---", err);
       setError('업로드 중 오류가 발생했습니다: ' + err.message);
     } finally {
       setIsUploading(false);
@@ -363,6 +381,7 @@ export default function App() {
       await firebaseService.deletePhoto(user.uid, id, photo.storagePath);
       setSelectedPhotoIds(prev => prev.filter(pid => pid !== id));
     } catch (err: any) {
+      console.error("--- [Error] 사진 삭제 실패 ---", err);
       setError('삭제 실패: ' + err.message);
     }
   };
@@ -385,6 +404,7 @@ export default function App() {
       setIsEditPhotoModalOpen(false);
       setEditingPhoto(null);
     } catch (err: any) {
+      console.error("--- [Error] 사진 업데이트 실패 ---", err);
       setError('수정 실패: ' + err.message);
     }
   };
@@ -415,6 +435,7 @@ export default function App() {
       setView('video-list');
       setSelectedPhotoIds([]);
     } catch (err: any) {
+      console.error("--- [Error] 프로젝트 저장 실패 ---", err);
       setError('프로젝트 저장 실패: ' + err.message);
     } finally {
       setIsLoading(false);
@@ -426,6 +447,7 @@ export default function App() {
     try {
       await firebaseService.deleteVideoProject(user.uid, id);
     } catch (err: any) {
+      console.error("--- [Error] 프로젝트 삭제 실패 ---", err);
       setError('프로젝트 삭제 실패: ' + err.message);
     }
   };
@@ -476,7 +498,7 @@ export default function App() {
         })));
       }
     } catch (err) {
-      console.error("AI Captions failed:", err);
+      console.error("--- [Error] AI 자막 생성 실패 ---", err);
       setError("AI 자막 생성 중 오류가 발생했습니다.");
     } finally {
       setIsGeneratingCaptions(false);
@@ -506,14 +528,21 @@ export default function App() {
           <div className="flex justify-center flex-col items-center gap-4">
             <Loader2 className="animate-spin text-[#A7C080]" size={32} />
             <p className="text-xs text-gray-400 font-bold">인증 처리 중...</p>
+            <button 
+              onClick={() => setIsLoading(false)} 
+              className="text-[10px] text-gray-300 underline mt-2"
+            >
+              로딩이 너무 길다면 클릭하여 중단
+            </button>
           </div>
         ) : (
           <button 
+            type="button"
             onClick={handleLogin}
-            className="w-full flex items-center justify-center gap-4 bg-white border-2 border-[#E5E5E5] hover:border-[#A7C080] py-4 rounded-2xl font-bold text-[#4B4453] transition-all group"
+            className="w-full flex items-center justify-center gap-4 bg-white border-2 border-[#E5E5E5] hover:border-[#A7C080] py-4 rounded-2xl font-bold text-[#4B4453] transition-all group active:scale-95"
           >
             <Image src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width={24} height={24} alt="Google" />
-            <span>구글로 시작하기</span>
+            <span>구글로 상자 열기</span>
           </button>
         )}
         <p className="text-[11px] text-[#BDBDBD]">구글 로그인 시 모든 기기에서 데이터가 실시간 동기화됩니다.</p>
@@ -631,7 +660,6 @@ export default function App() {
                   <div className="sm:flex items-center gap-3 mr-4 bg-gray-50 p-2 rounded-2xl pr-4 border border-gray-100 hidden">
                     <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-white shadow-sm relative flex items-center justify-center bg-gray-100">
                       {user.photoURL && !profileImgError ? (
-                        /* Use standard img tag for external profile photos to avoid Next.js Image optimization 400 errors */
                         <img 
                           src={user.photoURL} 
                           width={32} height={32} alt="U" 
@@ -705,6 +733,7 @@ export default function App() {
           </motion.div>
         )}
 
+        {/* Video Editor View */}
         {view === 'video-editor' && (
           <motion.div key="video-editor" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col bg-white">
             <header className="p-6 border-b flex justify-between items-center sticky top-0 bg-white z-40">
@@ -752,6 +781,7 @@ export default function App() {
           </motion.div>
         )}
 
+        {/* Video Library View */}
         {view === 'video-list' && (
           <motion.div key="video-list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col p-10 max-w-5xl mx-auto w-full space-y-12">
             <div className="flex items-center gap-6">
@@ -786,7 +816,7 @@ export default function App() {
       <AnimatePresence>
         {view === 'profiles' && (
           <div className="fixed inset-0 bg-[#4B4453]/60 backdrop-blur-xl z-[150] flex items-center justify-center p-6">
-             <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white w-full max-lg p-12 rounded-[60px] shadow-2xl relative border border-white/20">
+             <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white w-full max-w-lg p-12 rounded-[60px] shadow-2xl relative border border-white/20">
                 <button onClick={() => setView('dashboard')} className="absolute top-8 right-8 text-gray-300 hover:text-[#4B4453] transition-colors"><X size={32} /></button>
                 <div className="mb-12"><h2 className="text-3xl font-black mb-2">누구의 상자를 열까요?</h2><p className="text-gray-400 font-bold">아이들의 소중한 기록을 선택해 보세요.</p></div>
                 <div className="grid grid-cols-2 gap-6 mb-12">
