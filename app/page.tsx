@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Image from 'next/image';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { 
-  Baby, Plus, Trash2, X, Camera, Loader2, AlertCircle, Check, Video, Upload, Calendar, Clock, Image as ImageIcon, Save, Play, Edit3, List, ArrowLeft, Sparkles, Layout, LogOut, User as UserIcon, MessageSquare, Share2, ChevronLeft, ChevronRight, Copy
+  Baby, Plus, Trash2, X, Camera, Loader2, AlertCircle, Check, Video, Upload, Calendar, Clock, Image as ImageIcon, Save, Play, Edit3, List, ArrowLeft, Sparkles, Layout, LogOut, User as UserIcon, MessageSquare, Share2, ChevronLeft, ChevronRight, Copy, HelpCircle, Download
 } from 'lucide-react';
 import exifr from 'exifr';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -95,6 +95,7 @@ export default function App() {
   const [slideShowPhotos, setSlideShowPhotos] = useState<Photo[]>([]);
   const [isSlideShowPlaying, setIsSlideShowPlaying] = useState(true);
   const [copiedToClipboard, setCopiedToClipboard] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
 
   // --- Firebase Auth Listener ---
   useEffect(() => {
@@ -312,6 +313,30 @@ export default function App() {
       setTimeout(() => setCopiedToClipboard(false), 2500);
     }
   };
+  // --- 사진 저장(Download) ---
+  const savePhotoToGallery = async (photo: Photo) => {
+    try {
+      const response = await fetch(photo.imageUrl);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `growing_log_${photo.id || Date.now()}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      // Base64 방식 fallback
+      const a = document.createElement('a');
+      a.href = photo.imageUrl;
+      a.download = `growing_log_${photo.id || Date.now()}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  };
+
   const handleDeletePhoto = async (id: string) => { if (!user || !confirm('삭제하시겠습니까?')) return; try { await firebaseService.deletePhoto(user.uid, id); setSelectedPhotoIds(prev => prev.filter(pid => pid !== id)); setIsEditPhotoModalOpen(false); setEditingPhoto(null); } catch (err: any) { setError('삭제 실패'); } };
 
   const handleUpdatePhoto = async (e: React.FormEvent) => {
@@ -548,6 +573,7 @@ export default function App() {
                               <button onClick={(e) => { e.stopPropagation(); handleDeletePhoto(photo.id!); }} className="absolute top-4 right-4 p-3 bg-red-400/90 text-white rounded-[18px] opacity-0 group-hover:opacity-100 transition-all hover:bg-red-500 hover:scale-110 shadow-lg"><Trash2 size={18} /></button>
                               <button onClick={(e) => { e.stopPropagation(); handleEditPhoto(photo); }} className="absolute bottom-4 right-4 p-3 bg-[#A7C080]/90 text-white rounded-[18px] opacity-0 group-hover:opacity-100 transition-all hover:bg-[#8FA86A] hover:scale-110 shadow-lg"><Edit3 size={18} /></button>
                               <button onClick={(e) => { e.stopPropagation(); handleShare(photo); }} className="absolute bottom-4 left-4 p-3 bg-blue-400/90 text-white rounded-[18px] opacity-0 group-hover:opacity-100 transition-all hover:bg-blue-500 hover:scale-110 shadow-lg"><Share2 size={18} /></button>
+                              <button onClick={(e) => { e.stopPropagation(); savePhotoToGallery(photo); }} className="absolute top-4 left-16 p-3 bg-[#4B4453]/80 text-white rounded-[18px] opacity-0 group-hover:opacity-100 transition-all hover:bg-[#4B4453] hover:scale-110 shadow-lg"><Download size={18} /></button>
                             </div>
                             
                             <div className="px-4 pb-4 text-center">
@@ -591,6 +617,18 @@ export default function App() {
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* 도움말 플로팅 버튼 (FAB) - 대시보드에만 표시 */}
+            <motion.button
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={() => setIsHelpOpen(true)}
+              className="fixed bottom-8 right-8 z-[140] w-16 h-16 bg-white shadow-2xl shadow-black/10 border-2 border-[#F3EDEA] text-[#A7C080] rounded-full flex items-center justify-center hover:bg-[#A7C080] hover:text-white transition-colors"
+            >
+              <HelpCircle size={28} />
+            </motion.button>
           </motion.div>
         )}
 
@@ -867,6 +905,60 @@ export default function App() {
             <p className="mt-4 text-white/30 text-xs font-black uppercase tracking-widest">
               {slideShowIndex + 1} / {slideShowPhotos.length}
             </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 도움말 모달 */}
+      <AnimatePresence>
+        {isHelpOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[600] bg-[#4B4453]/50 backdrop-blur-md flex items-center justify-center p-6"
+            onClick={() => setIsHelpOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 30 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 30 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-white w-full max-w-md p-10 rounded-[60px] shadow-2xl space-y-8"
+            >
+              <div className="flex justify-between items-start">
+                <div>
+                  <h2 className="text-3xl font-black text-[#4B4453] tracking-tight">사용 방법</h2>
+                  <p className="text-gray-400 font-medium mt-1">성장 기록함 사용 가이드</p>
+                </div>
+                <button onClick={() => setIsHelpOpen(false)} className="p-3 text-gray-300 hover:text-gray-600 transition-colors">
+                  <X size={28} />
+                </button>
+              </div>
+
+              <div className="space-y-5">
+                {[
+                  { icon: <Camera size={22} className="text-[#A7C080]" />, title: '사진 담기', desc: '상단 "담기" 버튼으로 사진을 업로드하고 한 줄 메모를 남길 수 있어요.' },
+                  { icon: <Check size={22} className="text-[#A7C080]" />, title: '사진 선택', desc: '사진을 클릭하면 선택됩니다. 여러 장 선택 후 슬라이드쇼를 만들 수 있어요.' },
+                  { icon: <Video size={22} className="text-[#A7C080]" />, title: '슬라이드쇼', desc: '사진을 여러 장 선택한 뒤 하단 "슬라이드쇼" 버튼을 눌러 감성 영상을 감상하세요.' },
+                  { icon: <Download size={22} className="text-[#A7C080]" />, title: '사진 저장', desc: '사진 위에 마우스를 올리면 다운로드 버튼이 나타나요. 눌러서 기기에 저장하세요.' },
+                  { icon: <Share2 size={22} className="text-[#A7C080]" />, title: 'SNS 공유', desc: '공유 버튼으로 소셜미디어에 아이의 소중한 순간을 나눌 수 있어요.' },
+                  { icon: <Edit3 size={22} className="text-[#A7C080]" />, title: '메모 수정', desc: '연필 버튼을 눌러 날짜, 분류, 메모를 언제든지 수정할 수 있어요.' },
+                ].map((item, i) => (
+                  <div key={i} className="flex items-start gap-5 p-5 bg-[#FDF8F5] rounded-[28px]">
+                    <div className="w-10 h-10 bg-white rounded-[16px] flex items-center justify-center shadow-sm shrink-0">{item.icon}</div>
+                    <div>
+                      <p className="font-black text-[#4B4453] text-sm">{item.title}</p>
+                      <p className="text-gray-400 text-sm font-medium leading-relaxed mt-0.5">{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <button onClick={() => setIsHelpOpen(false)} className="w-full py-5 bg-[#A7C080] text-white rounded-[32px] font-black text-lg shadow-lg hover:bg-[#8FA86A] transition-all">
+                알겠어요! 🌿
+              </button>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
